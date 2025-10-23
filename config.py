@@ -6,11 +6,15 @@ Contains URLs, selectors, and other constants
 # ANBIMA URLs
 ANBIMA_BASE_URL = "https://data.anbima.com.br/busca/fundos"
 
-# Timeouts (in seconds)
-PAGE_LOAD_TIMEOUT = 30
-ELEMENT_WAIT_TIMEOUT = 20
-IMPLICIT_WAIT = 10
-SLEEP_BETWEEN_REQUESTS = 2  # Delay between CNPJ searches to avoid rate limiting
+# Timeouts (in seconds) - Otimizados para melhor performance
+PAGE_LOAD_TIMEOUT = 20  # Reduzido de 30s para 20s
+ELEMENT_WAIT_TIMEOUT = 15  # Reduzido de 20s para 15s
+IMPLICIT_WAIT = 5  # Reduzido de 10s para 5s
+SLEEP_BETWEEN_REQUESTS = 1  # Reduzido de 2s para 1s (por worker)
+
+# Parallel processing configuration
+DEFAULT_WORKERS = 4  # Número padrão de workers paralelos
+MAX_WORKERS = 8  # Máximo recomendado para evitar sobrecarga
 
 # Selenium selectors
 SELECTORS = {
