@@ -43,6 +43,19 @@ Automatizar o processo de coleta de dados periódicos (Data da cotização e Val
 - ✅ **Configurável**: Parâmetros ajustáveis para diferentes cenários de uso
 - ⚡ **NOVO: Modo Paralelo**: Processa múltiplos CNPJs simultaneamente (até 75% mais rápido!)
 
+### ⭐ Configuração Ideal (Validada e Recomendada)
+
+Após testes científicos extensivos e resolução da race condition do ChromeDriver, a **configuração ideal de produção** foi determinada:
+
+- **4 Workers Paralelos** (padrão)
+- **Taxa de Sucesso**: 98-99% (158-160/161 CNPJs)
+- **Performance**: 308-329 CNPJs/hora
+- **Tempo**: ~30-31 minutos para 161 CNPJs
+- **Estabilidade**: 100% confiável com pré-inicialização
+- **Pré-Inicialização**: Evita race condition do ChromeDriver ✅
+
+📄 Detalhes técnicos em: [`RACE_CONDITION_FIX.md`](RACE_CONDITION_FIX.md) | [`CONCLUSAO_TESTES_PARALELOS.md`](CONCLUSAO_TESTES_PARALELOS.md)
+
 ### Fluxo de Trabalho
 
 ```

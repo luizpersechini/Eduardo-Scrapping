@@ -53,6 +53,89 @@ def setup_logging():
     return logger, log_file
 
 
+def preinitialize_chromedriver(headless: bool = True) -> bool:
+    """
+    Pre-initializes ChromeDriver to avoid race condition when multiple workers start.
+    Downloads and installs the driver before workers are created.
+    
+    Args:
+        headless: Whether to use headless mode
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("\n" + "="*80)
+    logger.info("PRE-INITIALIZATION: Downloading ChromeDriver (avoiding race condition)")
+    logger.info("="*80)
+    
+    try:
+        scraper = ANBIMAScraper(headless=headless)
+        if scraper.setup_driver():
+            logger.info("✅ ChromeDriver downloaded and ready")
+            scraper.close()
+            return True
+        else:
+            logger.error("❌ Failed to initialize ChromeDriver")
+            return False
+    except Exception as e:
+        logger.error(f"❌ Error during ChromeDriver pre-initialization: {e}")
+        return False
+
+
+def test_workers(num_workers: int, headless: bool = True) -> bool:
+    """
+    Test if all workers can initialize their drivers successfully.
+    
+    Args:
+        num_workers: Number of workers to test
+        headless: Whether to use headless mode
+        
+    Returns:
+        True if all workers initialized successfully, False otherwise
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("\n" + "="*80)
+    logger.info(f"TESTING: Initializing {num_workers} workers")
+    logger.info("="*80)
+    
+    scrapers = []
+    success = True
+    
+    try:
+        # Try to initialize all workers
+        for i in range(1, num_workers + 1):
+            logger.info(f"  Testing Worker {i}...")
+            scraper = ANBIMAScraper(headless=headless)
+            
+            if scraper.setup_driver():
+                logger.info(f"  ✅ Worker {i}: Initialized successfully")
+                scrapers.append(scraper)
+                time.sleep(0.5)  # Small delay between initializations
+            else:
+                logger.error(f"  ❌ Worker {i}: Failed to initialize")
+                success = False
+                break
+        
+        if success:
+            logger.info(f"\n✅ ALL {num_workers} WORKERS INITIALIZED SUCCESSFULLY!")
+        else:
+            logger.error(f"\n❌ WORKER INITIALIZATION FAILED")
+            
+    finally:
+        # Clean up test scrapers
+        logger.info("\nCleaning up test workers...")
+        for scraper in scrapers:
+            try:
+                scraper.close()
+            except:
+                pass
+        time.sleep(2)  # Wait for cleanup
+    
+    logger.info("="*80 + "\n")
+    return success
+
+
 def get_processed_cnpjs(output_file: str) -> set:
     """
     Read already processed CNPJs from existing output file
@@ -251,6 +334,29 @@ def main_parallel(input_file: str = "input_cnpjs.xlsx",
             return False
         
         print(f"\n✓ Found {len(cnpjs)} CNPJ(s) to process")
+        
+        # PRE-INITIALIZE ChromeDriver to avoid race condition
+        logger.info("\n" + "="*80)
+        logger.info("Step 1.5: Pre-initializing ChromeDriver")
+        logger.info("="*80)
+        
+        if not preinitialize_chromedriver(headless):
+            logger.error("Failed to pre-initialize ChromeDriver")
+            print("\n❌ Error: Failed to pre-initialize ChromeDriver!")
+            return False
+        
+        # TEST workers before starting
+        logger.info("\n" + "="*80)
+        logger.info(f"Step 1.6: Testing {num_workers} workers")
+        logger.info("="*80)
+        
+        if not test_workers(num_workers, headless):
+            logger.error(f"Failed to initialize all {num_workers} workers")
+            print(f"\n❌ Error: Not all workers could initialize!")
+            print(f"   Try reducing the number of workers or check your system resources.")
+            return False
+        
+        print(f"\n✅ All {num_workers} workers tested successfully!")
         
         # Skip already processed CNPJs if requested
         if skip_processed:

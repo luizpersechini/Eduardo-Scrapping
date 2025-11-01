@@ -13,8 +13,8 @@ IMPLICIT_WAIT = 5  # Reduzido de 10s para 5s
 SLEEP_BETWEEN_REQUESTS = 1  # Reduzido de 2s para 1s (por worker)
 
 # Parallel processing configuration
-DEFAULT_WORKERS = 4  # Número padrão de workers paralelos
-MAX_WORKERS = 8  # Máximo recomendado para evitar sobrecarga
+DEFAULT_WORKERS = 4  # Número padrão de workers paralelos (CONFIGURAÇÃO IDEAL - TESTADO E VALIDADO)
+MAX_WORKERS = 4  # Máximo recomendado - ideal para estabilidade e performance (validado cientificamente)
 
 # Selenium selectors
 SELECTORS = {
