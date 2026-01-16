@@ -1,36 +1,35 @@
 """
-ANBIMA Fund Scraper using Selenium
-Handles web scraping of fund data from ANBIMA website
+ANBIMA Fund Scraper using Undetected ChromeDriver
+Handles web scraping of fund data from ANBIMA website with stealth mode to avoid bot detection
 """
 
 import time
+import random
 import logging
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
-from selenium import webdriver
+import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import (
     TimeoutException,
     NoSuchElementException,
     WebDriverException,
     StaleElementReferenceException
 )
-from webdriver_manager.chrome import ChromeDriverManager
 
 import config
 
 
-class ANBIMAScraper:
-    """Selenium-based scraper for ANBIMA fund data"""
+class StealthANBIMAScraper:
+    """Undetected ChromeDriver-based scraper for ANBIMA fund data"""
     
-    def __init__(self, headless: bool = True):
+    def __init__(self, headless: bool = False):
         """
-        Initialize the scraper
+        Initialize the stealth scraper
 
         Args:
             headless: Whether to run browser in headless mode
@@ -42,66 +41,26 @@ class ANBIMAScraper:
         self.rate_limit_count = 0
         
     def setup_driver(self):
-        """Initialize Selenium WebDriver with Chrome"""
+        """Initialize Undetected ChromeDriver"""
         try:
-            chrome_options = Options()
+            options = uc.ChromeOptions()
             
-            # Add options from config
-            for option in config.CHROME_OPTIONS:
-                if not self.headless and option in ["--headless", "--headless=new"]:
-                    continue  # Skip headless if disabled
-                chrome_options.add_argument(option)
+            # Add basic options (skip potentially problematic ones for undetected-chromedriver)
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--window-size=1920,1080')
+            options.add_argument('--disable-features=VizDisplayCompositor')
+            # Don't add --headless here, undetected-chromedriver handles it
+            # Don't add --disable-blink-features, it conflicts with UC
+            # Don't add --disable-web-security or --allow-running-insecure-content, they crash UC
             
-            # Anti-detection: Exclude automation switches
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
-            
-            # Initialize the driver
-            # Try to get the chromedriver path and fix it if necessary
-            import os
-            try:
-                driver_path = ChromeDriverManager().install()
-                self.logger.info(f"ChromeDriver initial path: {driver_path}")
-                
-                # Fix the path if it points to wrong file
-                if not driver_path.endswith('chromedriver') or 'THIRD_PARTY' in driver_path:
-                    driver_dir = os.path.dirname(driver_path)
-                    # Look for the actual chromedriver executable
-                    for file in os.listdir(driver_dir):
-                        if file == 'chromedriver':
-                            driver_path = os.path.join(driver_dir, file)
-                            self.logger.info(f"Found chromedriver at: {driver_path}")
-                            break
-                
-                # Make sure it's executable
-                if os.path.exists(driver_path):
-                    os.chmod(driver_path, 0o755)
-                    service = Service(driver_path)
-                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
-                else:
-                    raise FileNotFoundError(f"ChromeDriver not found at {driver_path}")
-                    
-            except Exception as e:
-                self.logger.error(f"ChromeDriverManager failed: {e}")
-                raise
-            
-            # Anti-detection: Remove webdriver property and other bot indicators
-            self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-                'source': '''
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined
-                    });
-                    Object.defineProperty(navigator, 'plugins', {
-                        get: () => [1, 2, 3, 4, 5]
-                    });
-                    Object.defineProperty(navigator, 'languages', {
-                        get: () => ['pt-BR', 'pt', 'en-US', 'en']
-                    });
-                    window.chrome = {
-                        runtime: {}
-                    };
-                '''
-            })
+            # Initialize undetected ChromeDriver
+            # Auto-detect Chrome version (will match current installation)
+            self.driver = uc.Chrome(
+                options=options,
+                headless=self.headless
+            )
             
             # Set timeouts
             self.driver.set_page_load_timeout(config.PAGE_LOAD_TIMEOUT)
@@ -110,16 +69,53 @@ class ANBIMAScraper:
             # Initialize WebDriverWait
             self.wait = WebDriverWait(self.driver, config.ELEMENT_WAIT_TIMEOUT)
             
-            self.logger.info("WebDriver initialized successfully")
+            self.logger.info("Stealth WebDriver initialized successfully")
             return True
             
         except Exception as e:
-            self.logger.error(f"Failed to initialize WebDriver: {str(e)}")
+            self.logger.error(f"Failed to initialize Stealth WebDriver: {str(e)}")
             return False
+    
+    def human_delay(self, min_sec: float = None, max_sec: float = None):
+        """
+        Random delay to simulate human behavior
+        
+        Args:
+            min_sec: Minimum delay in seconds (default from config)
+            max_sec: Maximum delay in seconds (default from config)
+        """
+        if min_sec is None:
+            min_sec = getattr(config, 'STEALTH_MIN_DELAY', 3.0)
+        if max_sec is None:
+            max_sec = getattr(config, 'STEALTH_MAX_DELAY', 7.0)
+        
+        delay = random.uniform(min_sec, max_sec)
+        time.sleep(delay)
+        self.logger.debug(f"Human delay: {delay:.2f}s")
+    
+    def simulate_human_behavior(self):
+        """Simulate random human-like interactions"""
+        try:
+            # Random scroll
+            if random.random() > 0.5:
+                scroll_height = random.randint(50, 200)
+                self.driver.execute_script(f"window.scrollBy(0, {scroll_height});")
+                time.sleep(random.uniform(0.5, 1.5))
+            
+            # Random mouse movement
+            if random.random() > 0.5:
+                try:
+                    element = self.driver.find_element(By.TAG_NAME, 'body')
+                    ActionChains(self.driver).move_to_element(element).perform()
+                    time.sleep(random.uniform(0.3, 0.8))
+                except:
+                    pass
+        except Exception as e:
+            self.logger.debug(f"Human behavior simulation error (non-critical): {str(e)}")
     
     def search_fund(self, cnpj: str) -> Tuple[bool, str]:
         """
-        Search for a fund by CNPJ
+        Search for a fund by CNPJ with human-like behavior
         
         Args:
             cnpj: The CNPJ to search for
@@ -132,14 +128,18 @@ class ANBIMAScraper:
             self.logger.info(f"Navigating to {config.ANBIMA_BASE_URL}")
             self.driver.get(config.ANBIMA_BASE_URL)
             
-            # Wait for page to load
-            time.sleep(3)
+            # Human delay after page load
+            self.human_delay(3, 5)
+            
+            # Simulate human behavior
+            if getattr(config, 'STEALTH_MOUSE_MOVEMENTS', True):
+                self.simulate_human_behavior()
             
             # Close cookies banner if present
             try:
                 cookie_button = self.driver.find_element(By.LINK_TEXT, "Prosseguir")
                 cookie_button.click()
-                time.sleep(1)
+                self.human_delay(1, 2)
             except:
                 pass
             
@@ -149,35 +149,39 @@ class ANBIMAScraper:
                 EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='Busque fundos']"))
             )
             
-            # Clear and enter CNPJ
+            # Simulate human typing (delay between keystrokes)
             search_input.clear()
-            search_input.send_keys(cnpj)
+            for char in cnpj:
+                search_input.send_keys(char)
+                time.sleep(random.uniform(0.05, 0.15))  # Typing delay
             
-            # Wait for autocomplete dropdown to appear
-            time.sleep(3)
+            self.human_delay(2, 4)  # Wait before looking for dropdown
             
             # Try to click on the dropdown result link
             self.logger.info("Looking for fund in dropdown results...")
             
             try:
-                # Look for the link in the dropdown that says "em fundos de investimento"
                 dropdown_link = self.wait.until(
                     EC.element_to_be_clickable((By.XPATH, "//a[contains(@href, '/busca/fundos?q=')]"))
                 )
                 
+                # Simulate mouse move before click
+                if getattr(config, 'STEALTH_MOUSE_MOVEMENTS', True):
+                    ActionChains(self.driver).move_to_element(dropdown_link).perform()
+                    time.sleep(random.uniform(0.3, 0.8))
+                
                 dropdown_link.click()
-                time.sleep(2)
+                self.human_delay(2, 3)
                 
                 # Now we should be on the search results page
-                # Wait for the results table
                 self.logger.info("Waiting for search results...")
-                time.sleep(2)
+                self.human_delay(2, 3)
                 
                 # Try to close dropdown if it's still open
                 try:
                     close_button = self.driver.find_element(By.CSS_SELECTOR, "button[aria-label='close-dropdown']")
                     close_button.click()
-                    time.sleep(1)
+                    self.human_delay(0.5, 1)
                 except:
                     pass
                 
@@ -188,8 +192,14 @@ class ANBIMAScraper:
                     return False, "No fund found for this CNPJ"
                 
                 self.logger.info(f"Found {len(fund_links)} result(s). Clicking on the first one...")
+                
+                # Move mouse and click
+                if getattr(config, 'STEALTH_MOUSE_MOVEMENTS', True):
+                    ActionChains(self.driver).move_to_element(fund_links[0]).perform()
+                    time.sleep(random.uniform(0.3, 0.8))
+                
                 fund_links[0].click()
-                time.sleep(3)
+                self.human_delay(2, 4)
                 
                 return True, "Fund found and clicked"
                 
@@ -275,7 +285,7 @@ class ANBIMAScraper:
                 
                 self.logger.info(f"Navigating to {periodic_url}")
                 self.driver.get(periodic_url)
-                time.sleep(3)
+                self.human_delay(3, 5)
                 
                 return True, "Successfully navigated to Dados Periódicos page"
             else:
@@ -299,7 +309,7 @@ class ANBIMAScraper:
             self.logger.info("Extracting periodic data table...")
             
             # Wait for table to be present
-            time.sleep(3)
+            self.human_delay(3, 5)
             
             # Find the table on the page
             try:
@@ -345,7 +355,7 @@ class ANBIMAScraper:
                 while scroll_count < max_scrolls:
                     # Scroll to bottom of page
                     self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(1)
+                    self.human_delay(0.8, 1.5)
                     
                     # Get new height
                     new_height = self.driver.execute_script("return document.body.scrollHeight")
@@ -363,7 +373,7 @@ class ANBIMAScraper:
                     scroll_count += 1
                 
                 # Wait a bit for final data to load
-                time.sleep(2)
+                self.human_delay(2, 3)
                 
                 # Get table body again (it may have been updated)
                 tbody = table.find_element(By.TAG_NAME, "tbody")
@@ -463,7 +473,7 @@ class ANBIMAScraper:
 
     def scrape_fund_data(self, cnpj: str) -> Dict:
         """
-        Complete scraping workflow for a single CNPJ
+        Complete scraping workflow for a single CNPJ with stealth mode
 
         Args:
             cnpj: The CNPJ to scrape
@@ -531,7 +541,7 @@ class ANBIMAScraper:
         if self.driver:
             try:
                 self.driver.quit()
-                self.logger.info("WebDriver closed")
+                self.logger.info("Stealth WebDriver closed")
             except Exception as e:
                 self.logger.error(f"Error closing WebDriver: {str(e)}")
     

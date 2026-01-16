@@ -6,20 +6,20 @@ Contains URLs, selectors, and other constants
 # ANBIMA URLs
 ANBIMA_BASE_URL = "https://data.anbima.com.br/busca/fundos"
 
-# Timeouts (in seconds) - Otimizados para melhor performance
-PAGE_LOAD_TIMEOUT = 20  # Reduzido de 30s para 20s
-ELEMENT_WAIT_TIMEOUT = 15  # Reduzido de 20s para 15s
-IMPLICIT_WAIT = 5  # Reduzido de 10s para 5s
-SLEEP_BETWEEN_REQUESTS = 1  # Reduzido de 2s para 1s (por worker)
+# Timeouts (in seconds) - Optimized for anti-spam compliance
+PAGE_LOAD_TIMEOUT = 60  # Increased for better stability
+ELEMENT_WAIT_TIMEOUT = 40  # Increased for better stability
+IMPLICIT_WAIT = 10  # Standard for stability
+SLEEP_BETWEEN_REQUESTS = 5  # Increased to reduce rate limit triggers
 
 # Parallel processing configuration
-DEFAULT_WORKERS = 4  # Número padrão de workers paralelos (CONFIGURAÇÃO IDEAL - TESTADO E VALIDADO)
-MAX_WORKERS = 4  # Máximo recomendado - ideal para estabilidade e performance (validado cientificamente)
+DEFAULT_WORKERS = 1  # Reduced to 1 to avoid rate limiting
+MAX_WORKERS = 4  # Maximum allowed
 
 # Selenium selectors
 SELECTORS = {
     # Search box where CNPJ is entered
-    "search_input": "input[placeholder*='Pesquise']",
+    "search_input": "input[placeholder*='Busque fundos']",
     
     # Search button
     "search_button": "button[type='submit']",
@@ -56,12 +56,18 @@ LOG_FILE = "anbima_scraper.log"
 
 # Chrome options
 CHROME_OPTIONS = [
-    "--headless",  # Run in background
+    "--headless=new",  # New headless mode (more stable)
     "--no-sandbox",
     "--disable-dev-shm-usage",
     "--disable-gpu",
     "--window-size=1920,1080",
     "--disable-blink-features=AutomationControlled",
+    "--disable-features=VizDisplayCompositor",
+    "--disable-extensions",
+    "--disable-logging",
+    "--disable-web-security",
+    "--ignore-certificate-errors",
+    "--allow-running-insecure-content",
     "user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 ]
 
@@ -69,3 +75,15 @@ CHROME_OPTIONS = [
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds
 
+# Stealth mode settings
+STEALTH_MODE = True  # Enabled by default for anti-spam compliance
+STEALTH_MIN_DELAY = 5.0  # Minimum delay between actions (seconds)
+STEALTH_MAX_DELAY = 10.0  # Maximum delay between actions (seconds)
+STEALTH_MOUSE_MOVEMENTS = True  # Simulate mouse movements
+
+# Parse.bot Configuration
+PARSE_BOT_API_KEY = "24dbba3c-f4ba-49cc-94d8-92ba5783dd88"
+PARSE_BOT_API_URL = "https://api.parse.bot"
+# NOTE: The value below must be the SCRAPER ID (from the dashboard URL), NOT the API Key.
+PARSE_BOT_SCRAPER_ID = "f19cc2d1-d638-44e9-80ec-252702403db4"
+USE_PARSE_BOT = True  # Enable Parse.bot for this branch

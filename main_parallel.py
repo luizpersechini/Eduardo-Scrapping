@@ -7,15 +7,17 @@ import os
 import sys
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
+from collections import deque
 from tqdm import tqdm
 import pandas as pd
 
 import config
 from anbima_scraper import ANBIMAScraper
 from data_processor import DataProcessor
+# Stealth scraper will be imported conditionally if needed
 
 
 # Global variables for thread-safe operations
@@ -25,6 +27,193 @@ processed_count = 0
 success_count = 0
 failed_count = 0
 start_time = None
+
+
+class GlobalRateLimiter:
+    """
+    Thread-safe global rate limiter to coordinate all workers
+    Ensures total request rate across all workers stays under threshold
+    """
+
+    def __init__(self, max_requests_per_minute: int = 15):
+        """
+        Initialize rate limiter
+
+        Args:
+            max_requests_per_minute: Maximum requests allowed per minute across all workers
+        """
+        self.max_requests = max_requests_per_minute
+        self.requests = []
+        self.lock = Lock()
+        self.logger = logging.getLogger("RateLimiter")
+
+    def wait_if_needed(self):
+        """Block if rate limit would be exceeded"""
+        with self.lock:
+            now = time.time()
+            # Remove requests older than 60 seconds
+            self.requests = [req_time for req_time in getattr(self, 'requests', [])
+                           if now - req_time < 60]
+
+            # If at limit, wait
+            if len(self.requests) >= getattr(config, 'MAX_REQUESTS_PER_MINUTE', 15):
+                if self.requests:
+                    oldest_request = self.requests[0]
+                    wait_time = 60 - (time.time() - oldest_request)
+                    if wait_time > 0:
+                        logging.info(f"Rate limit reached ({len(self.requests)} req/min). Waiting {wait_time:.1f}s")
+                        time.sleep(wait_time)
+                        # Clear old requests
+                        self.requests = [t for t in self.requests if time.time() - t < 60]
+
+            # Record this request
+            self.requests.append(time.time())
+
+
+# Global rate limiter instance
+rate_limiter = GlobalRateLimiter(max_requests_per_minute=15)
+
+
+def scrape_worker(worker_id: int, cnpj_list: list, headless: bool = True, pbar: tqdm = None, use_stealth: bool = False):
+    """
+    Worker function that processes a list of CNPJs
+
+    Args:
+        worker_id: ID of this worker (for logging)
+        cnpj_list: List of CNPJs to process
+        headless: Whether to run browser in headless mode
+        pbar: Progress bar to update
+        use_stealth: Whether to use stealth mode
+
+    Returns:
+        List of results
+    """
+    global all_results, processed_count, success_count, failed_count, start_time, rate_limiter
+
+    logger = logging.getLogger(f"Worker-{worker_id}")
+    logger.info(f"Worker {worker_id} starting with {len(cnpj_list)} CNPJs")
+
+    worker_results = []
+    worker_success = 0
+    worker_failed = 0
+
+    # Initialize scraper for this worker
+    if use_stealth:
+        from stealth_scraper import StealthANBIMAScraper
+        scraper = StealthANBIMAScraper(headless=headless)
+    else:
+        scraper = ANBIMAScraper(headless=headless)
+
+    if not scraper.setup_driver():
+        logger.error(f"Worker {worker_id}: Failed to initialize web driver")
+        return []
+
+    logger.info(f"Worker {worker_id}: Web driver initialized successfully")
+
+    try:
+        for cnpj in cnpj_list:
+            logger.info(f"Worker {worker_id}: Processing {cnpj}")
+
+            # Wait for global rate limiter before making request
+            rate_limiter.wait_if_needed()
+
+            # Scrape fund data with retry logic and exponential backoff
+            max_retries = config.MAX_RETRIES
+            retry_count = 0
+            result = None
+            base_retry_delay = config.RETRY_DELAY
+
+            while retry_count < max_retries:
+                try:
+                    result = scraper.scrape_fund_data(cnpj)
+
+                    if result.get("Status") == "Success":
+                        logger.info(f"Worker {worker_id}: ✓ Successfully scraped {cnpj}")
+                        worker_success += 1
+                        break
+                    else:
+                        error_msg = result.get('Status', 'Unknown error')
+                        logger.warning(f"Worker {worker_id}: Failed to scrape {cnpj}: {error_msg}")
+
+                        # Don't retry if CNPJ not found
+                        if "not found" in error_msg.lower() or "no results" in error_msg.lower():
+                            logger.info(f"Worker {worker_id}: CNPJ not found, skipping retries")
+                            worker_failed += 1
+                            break
+
+                        # Exponential backoff for rate limiting
+                        if "rate limit" in error_msg.lower():
+                            if retry_count < max_retries - 1:
+                                # Exponential backoff: 60s, 120s, 240s
+                                backoff_delay = 60 * (2 ** retry_count)
+                                logger.warning(f"Worker {worker_id}: Rate limited! Backing off for {backoff_delay}s (attempt {retry_count + 2}/{max_retries})")
+                                time.sleep(backoff_delay)
+                            else:
+                                worker_failed += 1
+                            retry_count += 1
+                            continue
+
+                        # Standard retry for other errors
+                        if retry_count < max_retries - 1:
+                            retry_delay = base_retry_delay * (1.5 ** retry_count)  # Mild exponential increase
+                            logger.info(f"Worker {worker_id}: Retrying in {retry_delay:.1f}s... (attempt {retry_count + 2}/{max_retries})")
+                            time.sleep(retry_delay)
+                        else:
+                            worker_failed += 1
+                        retry_count += 1
+
+                except Exception as e:
+                    logger.error(f"Worker {worker_id}: Error scraping {cnpj}: {str(e)}")
+                    if retry_count < max_retries - 1:
+                        retry_delay = base_retry_delay * (1.5 ** retry_count)
+                        logger.info(f"Worker {worker_id}: Retrying in {retry_delay:.1f}s... (attempt {retry_count + 2}/{max_retries})")
+                        time.sleep(retry_delay)
+                    else:
+                        worker_failed += 1
+                    retry_count += 1
+                    result = {
+                        "CNPJ": cnpj,
+                        "Nome do Fundo": "N/A",
+                        "periodic_data": [],
+                        "Status": f"Error after {max_retries} retries: {str(e)}"
+                    }
+
+            if result:
+                worker_results.append(result)
+
+                # Update global counters (thread-safe)
+                with results_lock:
+                    all_results.append(result)
+                    processed_count += 1
+                    if result.get("Status") == "Success":
+                        success_count += 1
+                    else:
+                        failed_count += 1
+
+                    # Update progress bar
+                    if pbar:
+                        pbar.update(1)
+                        # Calculate statistics
+                        elapsed = time.time() - start_time
+                        rate = processed_count / elapsed if elapsed > 0 else 0
+                        remaining = len(cnpj_list) * 4 - processed_count  # Approximate total
+                        eta = remaining / rate if rate > 0 else 0
+                        pbar.set_postfix({
+                            'success': success_count,
+                            'failed': failed_count,
+                            'rate': f'{rate:.2f}/s',
+                            'eta': f'{eta/60:.1f}min'
+                        })
+
+            # Delay between requests - use full delay since we have 1 worker by default now
+            time.sleep(config.SLEEP_BETWEEN_REQUESTS)
+
+    finally:
+        # Close browser for this worker
+        scraper.close()
+        logger.info(f"Worker {worker_id}: Finished. Success: {worker_success}, Failed: {worker_failed}")
+
+    return worker_results
 
 
 def setup_logging():
@@ -53,24 +242,30 @@ def setup_logging():
     return logger, log_file
 
 
-def preinitialize_chromedriver(headless: bool = True) -> bool:
+def preinitialize_chromedriver(headless: bool = True, use_stealth: bool = False) -> bool:
     """
     Pre-initializes ChromeDriver to avoid race condition when multiple workers start.
     Downloads and installs the driver before workers are created.
     
     Args:
         headless: Whether to use headless mode
+        use_stealth: Whether to use stealth mode (undetected-chromedriver)
         
     Returns:
         True if successful, False otherwise
     """
     logger = logging.getLogger(__name__)
     logger.info("\n" + "="*80)
-    logger.info("PRE-INITIALIZATION: Downloading ChromeDriver (avoiding race condition)")
+    logger.info(f"PRE-INITIALIZATION: Downloading ChromeDriver ({'STEALTH' if use_stealth else 'STANDARD'} mode)")
     logger.info("="*80)
     
     try:
-        scraper = ANBIMAScraper(headless=headless)
+        if use_stealth:
+            from stealth_scraper import StealthANBIMAScraper
+            scraper = StealthANBIMAScraper(headless=headless)
+        else:
+            scraper = ANBIMAScraper(headless=headless)
+        
         if scraper.setup_driver():
             logger.info("✅ ChromeDriver downloaded and ready")
             scraper.close()
@@ -83,20 +278,21 @@ def preinitialize_chromedriver(headless: bool = True) -> bool:
         return False
 
 
-def test_workers(num_workers: int, headless: bool = True) -> bool:
+def test_workers(num_workers: int, headless: bool = True, use_stealth: bool = False) -> bool:
     """
     Test if all workers can initialize their drivers successfully.
     
     Args:
         num_workers: Number of workers to test
         headless: Whether to use headless mode
+        use_stealth: Whether to use stealth mode (undetected-chromedriver)
         
     Returns:
         True if all workers initialized successfully, False otherwise
     """
     logger = logging.getLogger(__name__)
     logger.info("\n" + "="*80)
-    logger.info(f"TESTING: Initializing {num_workers} workers")
+    logger.info(f"TESTING: Initializing {num_workers} workers ({'STEALTH' if use_stealth else 'STANDARD'} mode)")
     logger.info("="*80)
     
     scrapers = []
@@ -106,7 +302,11 @@ def test_workers(num_workers: int, headless: bool = True) -> bool:
         # Try to initialize all workers
         for i in range(1, num_workers + 1):
             logger.info(f"  Testing Worker {i}...")
-            scraper = ANBIMAScraper(headless=headless)
+            if use_stealth:
+                from stealth_scraper import StealthANBIMAScraper
+                scraper = StealthANBIMAScraper(headless=headless)
+            else:
+                scraper = ANBIMAScraper(headless=headless)
             
             if scraper.setup_driver():
                 logger.info(f"  ✅ Worker {i}: Initialized successfully")
@@ -164,7 +364,7 @@ def get_processed_cnpjs(output_file: str) -> set:
     return processed
 
 
-def scrape_worker(worker_id: int, cnpj_list: list, headless: bool = True, pbar: tqdm = None):
+def scrape_worker(worker_id: int, cnpj_list: list, headless: bool = True, pbar: tqdm = None, use_stealth: bool = False):
     """
     Worker function that processes a list of CNPJs
     
@@ -173,6 +373,7 @@ def scrape_worker(worker_id: int, cnpj_list: list, headless: bool = True, pbar: 
         cnpj_list: List of CNPJs to process
         headless: Whether to run browser in headless mode
         pbar: Progress bar to update
+        use_stealth: Whether to use stealth mode
         
     Returns:
         List of results
@@ -187,7 +388,11 @@ def scrape_worker(worker_id: int, cnpj_list: list, headless: bool = True, pbar: 
     worker_failed = 0
     
     # Initialize scraper for this worker
-    scraper = ANBIMAScraper(headless=headless)
+    if use_stealth:
+        from stealth_scraper import StealthANBIMAScraper
+        scraper = StealthANBIMAScraper(headless=headless)
+    else:
+        scraper = ANBIMAScraper(headless=headless)
     
     if not scraper.setup_driver():
         logger.error(f"Worker {worker_id}: Failed to initialize web driver")
@@ -198,16 +403,17 @@ def scrape_worker(worker_id: int, cnpj_list: list, headless: bool = True, pbar: 
     try:
         for cnpj in cnpj_list:
             logger.info(f"Worker {worker_id}: Processing {cnpj}")
-            
-            # Scrape fund data with retry logic
+
+            # Scrape fund data with retry logic and exponential backoff
             max_retries = config.MAX_RETRIES
             retry_count = 0
             result = None
-            
+            base_retry_delay = config.RETRY_DELAY
+
             while retry_count < max_retries:
                 try:
                     result = scraper.scrape_fund_data(cnpj)
-                    
+
                     if result.get("Status") == "Success":
                         logger.info(f"Worker {worker_id}: ✓ Successfully scraped {cnpj}")
                         worker_success += 1
@@ -215,25 +421,40 @@ def scrape_worker(worker_id: int, cnpj_list: list, headless: bool = True, pbar: 
                     else:
                         error_msg = result.get('Status', 'Unknown error')
                         logger.warning(f"Worker {worker_id}: Failed to scrape {cnpj}: {error_msg}")
-                        
+
                         # Don't retry if CNPJ not found
                         if "not found" in error_msg.lower() or "no results" in error_msg.lower():
                             logger.info(f"Worker {worker_id}: CNPJ not found, skipping retries")
                             worker_failed += 1
                             break
-                        
+
+                        # Exponential backoff for rate limiting
+                        if "rate limit" in error_msg.lower():
+                            if retry_count < max_retries - 1:
+                                # Exponential backoff: 60s, 120s, 240s
+                                backoff_delay = 60 * (2 ** retry_count)
+                                logger.warning(f"Worker {worker_id}: Rate limited! Backing off for {backoff_delay}s (attempt {retry_count + 2}/{max_retries})")
+                                time.sleep(backoff_delay)
+                            else:
+                                worker_failed += 1
+                            retry_count += 1
+                            continue
+
+                        # Standard retry for other errors
                         if retry_count < max_retries - 1:
-                            logger.info(f"Worker {worker_id}: Retrying... (attempt {retry_count + 2}/{max_retries})")
-                            time.sleep(config.RETRY_DELAY)
+                            retry_delay = base_retry_delay * (1.5 ** retry_count)  # Mild exponential increase
+                            logger.info(f"Worker {worker_id}: Retrying in {retry_delay:.1f}s... (attempt {retry_count + 2}/{max_retries})")
+                            time.sleep(retry_delay)
                         else:
                             worker_failed += 1
                         retry_count += 1
-                
+
                 except Exception as e:
                     logger.error(f"Worker {worker_id}: Error scraping {cnpj}: {str(e)}")
                     if retry_count < max_retries - 1:
-                        logger.info(f"Worker {worker_id}: Retrying... (attempt {retry_count + 2}/{max_retries})")
-                        time.sleep(config.RETRY_DELAY)
+                        retry_delay = base_retry_delay * (1.5 ** retry_count)
+                        logger.info(f"Worker {worker_id}: Retrying in {retry_delay:.1f}s... (attempt {retry_count + 2}/{max_retries})")
+                        time.sleep(retry_delay)
                     else:
                         worker_failed += 1
                     retry_count += 1
@@ -243,10 +464,10 @@ def scrape_worker(worker_id: int, cnpj_list: list, headless: bool = True, pbar: 
                         "periodic_data": [],
                         "Status": f"Error after {max_retries} retries: {str(e)}"
                     }
-            
+
             if result:
                 worker_results.append(result)
-                
+
                 # Update global counters (thread-safe)
                 with results_lock:
                     all_results.append(result)
@@ -255,7 +476,7 @@ def scrape_worker(worker_id: int, cnpj_list: list, headless: bool = True, pbar: 
                         success_count += 1
                     else:
                         failed_count += 1
-                    
+
                     # Update progress bar
                     if pbar:
                         pbar.update(1)
@@ -270,9 +491,9 @@ def scrape_worker(worker_id: int, cnpj_list: list, headless: bool = True, pbar: 
                             'rate': f'{rate:.2f}/s',
                             'eta': f'{eta/60:.1f}min'
                         })
-            
-            # Small delay between requests (per worker)
-            time.sleep(config.SLEEP_BETWEEN_REQUESTS / 2)  # Reduced since we have multiple workers
+
+            # Delay between requests - use full delay since we have 1 worker by default now
+            time.sleep(config.SLEEP_BETWEEN_REQUESTS)
     
     finally:
         # Close browser for this worker
@@ -286,7 +507,8 @@ def main_parallel(input_file: str = "input_cnpjs.xlsx",
                  output_file: str = None, 
                  headless: bool = True,
                  num_workers: int = 4,
-                 skip_processed: bool = False):
+                 skip_processed: bool = False,
+                 use_stealth: bool = False):
     """
     Main execution function with parallel processing
     
@@ -296,6 +518,7 @@ def main_parallel(input_file: str = "input_cnpjs.xlsx",
         headless: Whether to run browser in headless mode
         num_workers: Number of parallel workers (default: 4)
         skip_processed: Whether to skip already processed CNPJs
+        use_stealth: Whether to use stealth mode (undetected-chromedriver)
     """
     global all_results, processed_count, success_count, failed_count, start_time
     
@@ -310,6 +533,7 @@ def main_parallel(input_file: str = "input_cnpjs.xlsx",
         logger.info(f"Input file: {input_file}")
         logger.info(f"Output file: {output_file}")
         logger.info(f"Headless mode: {headless}")
+        logger.info(f"Stealth mode: {use_stealth}")
         logger.info(f"Number of workers: {num_workers}")
         logger.info(f"Skip processed: {skip_processed}")
         
@@ -340,7 +564,7 @@ def main_parallel(input_file: str = "input_cnpjs.xlsx",
         logger.info("Step 1.5: Pre-initializing ChromeDriver")
         logger.info("="*80)
         
-        if not preinitialize_chromedriver(headless):
+        if not preinitialize_chromedriver(headless, use_stealth):
             logger.error("Failed to pre-initialize ChromeDriver")
             print("\n❌ Error: Failed to pre-initialize ChromeDriver!")
             return False
@@ -350,7 +574,7 @@ def main_parallel(input_file: str = "input_cnpjs.xlsx",
         logger.info(f"Step 1.6: Testing {num_workers} workers")
         logger.info("="*80)
         
-        if not test_workers(num_workers, headless):
+        if not test_workers(num_workers, headless, use_stealth):
             logger.error(f"Failed to initialize all {num_workers} workers")
             print(f"\n❌ Error: Not all workers could initialize!")
             print(f"   Try reducing the number of workers or check your system resources.")
@@ -416,7 +640,7 @@ def main_parallel(input_file: str = "input_cnpjs.xlsx",
             # Submit all workers
             futures = []
             for i, chunk in enumerate(cnpj_chunks):
-                future = executor.submit(scrape_worker, i+1, chunk, headless, pbar)
+                future = executor.submit(scrape_worker, i+1, chunk, headless, pbar, use_stealth)
                 futures.append(future)
             
             # Wait for all workers to complete
@@ -519,6 +743,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Skip already processed CNPJs from output file"
     )
+    parser.add_argument(
+        "--stealth",
+        action="store_true",
+        help="Use stealth mode (undetected-chromedriver) to avoid bot detection"
+    )
     
     args = parser.parse_args()
     
@@ -528,7 +757,8 @@ if __name__ == "__main__":
         output_file=args.output,
         headless=not args.no_headless,
         num_workers=args.workers,
-        skip_processed=args.skip_processed
+        skip_processed=args.skip_processed,
+        use_stealth=args.stealth
     )
     
     # Exit with appropriate code
