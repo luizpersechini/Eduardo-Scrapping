@@ -131,7 +131,7 @@ if st.session_state.cnpjs:
 
     # Show first 10 CNPJs
     with st.expander(f"View {len(st.session_state.cnpjs)} CNPJs", expanded=False):
-        st.dataframe(preview_df, use_container_width=True)
+        st.dataframe(preview_df, width="stretch")
 
 # Scraping controls
 if st.session_state.cnpjs and not st.session_state.scraping_in_progress:
@@ -165,24 +165,8 @@ if st.session_state.scraping_in_progress:
     # Progress bar
     progress_bar = st.progress(st.session_state.progress)
 
-    # Status metrics
+    # Status metrics - create empty containers
     col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.metric("Progress", f"{st.session_state.progress:.0%}")
-
-    with col2:
-        st.metric("Success", st.session_state.success_count,
-                 delta=None if st.session_state.success_count == 0 else st.session_state.success_count)
-
-    with col3:
-        st.metric("Failed", st.session_state.failed_count,
-                 delta=None if st.session_state.failed_count == 0 else -st.session_state.failed_count)
-
-    with col4:
-        if st.session_state.start_time:
-            elapsed = time.time() - st.session_state.start_time
-            st.metric("Time Elapsed", f"{elapsed/60:.1f} min")
 
     # Current status
     status_container = st.container()
@@ -211,7 +195,8 @@ if st.session_state.scraping_in_progress:
 
         for idx, cnpj in enumerate(st.session_state.cnpjs, 1):
             # Update status
-            status_container.info(f"🔄 Scraping: {cnpj} ({idx}/{total})")
+            with status_container:
+                st.info(f"🔄 Scraping: {cnpj} ({idx}/{total})")
 
             # Scrape
             result = scraper.scrape_fund_data(cnpj)
@@ -229,22 +214,25 @@ if st.session_state.scraping_in_progress:
 
             # Update progress
             st.session_state.progress = idx / total
-
-            # Update UI
             progress_bar.progress(st.session_state.progress)
 
+            # Update metrics in their containers
+            with col1:
+                st.metric("Progress", f"{st.session_state.progress:.0%}")
+            with col2:
+                st.metric("Success", st.session_state.success_count)
+            with col3:
+                st.metric("Failed", st.session_state.failed_count)
+            with col4:
+                if st.session_state.start_time:
+                    elapsed = time.time() - st.session_state.start_time
+                    st.metric("Time Elapsed", f"{elapsed/60:.1f} min")
+
+            # Update activity log
             with log_container:
-                # Show last 10 messages
+                # Show last 10 messages only
                 for msg in st.session_state.status_messages[-10:]:
                     st.text(msg)
-
-            # Refresh metrics
-            col2.metric("Success", st.session_state.success_count)
-            col3.metric("Failed", st.session_state.failed_count)
-
-            if st.session_state.start_time:
-                elapsed = time.time() - st.session_state.start_time
-                col4.metric("Time Elapsed", f"{elapsed/60:.1f} min")
 
         # Close scraper
         scraper.close()
@@ -294,7 +282,7 @@ if st.session_state.results is not None and not st.session_state.scraping_in_pro
 
     # Results preview
     st.subheader("📊 Results Preview")
-    st.dataframe(st.session_state.results.head(10), use_container_width=True)
+    st.dataframe(st.session_state.results.head(10), width="stretch")
 
     # Download button
     st.subheader("📥 Download Results")
