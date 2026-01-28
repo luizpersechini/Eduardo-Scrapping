@@ -35,6 +35,20 @@ logs/
 output_*.xlsx
 chromedriver*
 
+# Secrets and environment variables
+.env
+.env.local
+.env.*.local
+*.secret
+secrets.toml
+.streamlit/secrets.toml
+
+# Sensitive data
+*.xlsx
+!input_valid_cnpjs.xlsx
+*.csv
+instance/
+
 # OS
 .DS_Store
 Thumbs.db
