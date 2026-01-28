@@ -78,9 +78,10 @@ MAX_CNPJ_TIMEOUT = 180  # Maximum time per CNPJ (3 minutes)
 
 # Stealth mode settings
 STEALTH_MODE = True  # Enabled by default for anti-spam compliance
-STEALTH_MIN_DELAY = 5.0  # Minimum delay between actions (seconds)
-STEALTH_MAX_DELAY = 10.0  # Maximum delay between actions (seconds)
+STEALTH_MIN_DELAY = 8.0  # Minimum delay between actions (seconds) - increased for anti-bot
+STEALTH_MAX_DELAY = 15.0  # Maximum delay between actions (seconds) - increased for anti-bot
 STEALTH_MOUSE_MOVEMENTS = True  # Simulate mouse movements
+RECOMMEND_NON_HEADLESS = True  # Headless mode more likely to be detected
 
 # Parse.bot Configuration
 # SECURITY: API keys removed from code - set via environment variables

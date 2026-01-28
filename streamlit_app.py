@@ -158,8 +158,11 @@ with st.sidebar:
     use_stealth = st.checkbox("Stealth Mode", value=True,
                               help="Use undetected ChromeDriver to avoid bot detection (Recommended)")
 
-    headless = st.checkbox("Headless Mode", value=True,
-                          help="Run browser without GUI (faster)")
+    headless = st.checkbox("Headless Mode", value=False,
+                          help="Run browser without GUI (faster, but MORE likely to be detected by anti-bot)")
+
+    if headless:
+        st.warning("⚠️ Headless mode may trigger anti-bot detection. If scraping fails repeatedly, disable headless mode.")
 
     num_workers = st.selectbox("Workers", options=[1, 2], index=0,
                                help="Number of parallel workers (1 recommended for stability)")

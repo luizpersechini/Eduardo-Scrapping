@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ANBIMA Data Scraper</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1><i class="fas fa-chart-line"></i> ANBIMA Data Scraper</h1>
+                <p class="subtitle">Extração automatizada de dados de fundos da ANBIMA</p>
+            </div>
+            <div class="stats-bar" id="statsBar">
+                <div class="stat-item">
+                    <i class="fas fa-tasks"></i>
+                    <span class="stat-label">Total de Jobs:</span>
+                    <span class="stat-value" id="totalJobs">0</span>
+                </div>
+                <div class="stat-item">
+                    <i class="fas fa-check-circle"></i>
+                    <span class="stat-label">Completados:</span>
+                    <span class="stat-value" id="completedJobs">0</span>
+                </div>
+                <div class="stat-item">
+                    <i class="fas fa-spinner"></i>
+                    <span class="stat-label">Em Andamento:</span>
+                    <span class="stat-value" id="runningJobs">0</span>
+                </div>
+                <div class="stat-item">
+                    <i class="fas fa-database"></i>
+                    <span class="stat-label">CNPJs Extraídos:</span>
+                    <span class="stat-value" id="totalCNPJs">0</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Upload Section -->
+            <section class="card upload-section">
+                <h2><i class="fas fa-cloud-upload-alt"></i> Novo Job de Scraping</h2>
+                <form id="uploadForm" class="upload-form">
+                    <div class="form-group">
+                        <label for="fileInput" class="file-label">
+                            <i class="fas fa-file-excel"></i>
+                            <span>Selecione o arquivo Excel com CNPJs</span>
+                            <input type="file" id="fileInput" name="file" accept=".xlsx,.xls" required>
+                        </label>
+                        <div class="file-info" id="fileInfo"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="workersInput">
+                            <i class="fas fa-cogs"></i> Número de Workers Paralelos:
+                        </label>
+                        <div class="slider-container">
+                            <input type="range" id="workersInput" name="workers" min="1" max="4" value="2">
+                            <span class="slider-value" id="workersValue">2</span>
+                        </div>
+                        <small class="form-hint">
+                            <i class="fas fa-info-circle"></i> Recomendado: 2 workers para melhor estabilidade
+                        </small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <div style="display: flex; align-items: flex-start; padding: 10px; background: #fef3c7; border: 2px solid #f59e0b; border-radius: 5px;">
+                            <input type="checkbox" id="useStealthMode" name="use_stealth" style="margin-right: 10px; width: 18px; height: 18px; margin-top: 2px;">
+                            <label for="useStealthMode" style="margin: 0; cursor: pointer;">
+                                <i class="fas fa-user-secret"></i> Usar Modo Stealth ⚠️
+                                <small style="display: block; color: #92400e; margin-top: 3px; font-weight: bold;">
+                                    ⚠️ RECOMENDADO: Evita bloqueio de bot. Desmarque apenas se necessário.
+                                </small>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary btn-upload">
+                        <i class="fas fa-upload"></i> Upload e Criar Job
+                    </button>
+                </form>
+            </section>
+
+            <!-- Active Job Section -->
+            <section class="card active-job-section" id="activeJobSection" style="display: none;">
+                <h2><i class="fas fa-running"></i> Job em Andamento</h2>
+                <div class="job-details" id="activeJobDetails">
+                    <div class="job-header">
+                        <h3 id="activeJobTitle">Job #<span id="activeJobId"></span></h3>
+                        <span class="job-badge" id="activeJobStatus">Running</span>
+                    </div>
+                    
+                    <div class="progress-section">
+                        <div class="progress-info">
+                            <span id="activeJobMessage">Iniciando...</span>
+                            <span id="activeJobProgress">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="activeJobProgressBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="job-stats">
+                        <div class="job-stat success">
+                            <i class="fas fa-check"></i>
+                            <span class="stat-number" id="activeJobSuccess">0</span>
+                            <span class="stat-label">Sucesso</span>
+                        </div>
+                        <div class="job-stat failed">
+                            <i class="fas fa-times"></i>
+                            <span class="stat-number" id="activeJobFailed">0</span>
+                            <span class="stat-label">Falhas</span>
+                        </div>
+                        <div class="job-stat total">
+                            <i class="fas fa-list"></i>
+                            <span class="stat-number" id="activeJobTotal">0</span>
+                            <span class="stat-label">Total</span>
+                        </div>
+                    </div>
+                    
+                    <div class="live-log" id="liveLog">
+                        <div class="log-header">
+                            <i class="fas fa-terminal"></i> Log em Tempo Real
+                        </div>
+                        <div class="log-content" id="logContent"></div>
+                    </div>
+                    
+                    <div class="job-actions" style="margin-top: 20px; text-align: center;">
+                        <button class="btn btn-danger" id="stopJobBtn" onclick="stopCurrentJob()" style="display: none;">
+                            <i class="fas fa-stop"></i> Parar Job
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Jobs History -->
+            <section class="card jobs-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2><i class="fas fa-history"></i> Histórico de Jobs</h2>
+                    <button class="btn btn-sm" onclick="fixStuckJobs()" style="background: #6366f1;">
+                        <i class="fas fa-wrench"></i> Corrigir Jobs Travados
+                    </button>
+                </div>
+                <div class="jobs-list" id="jobsList">
+                    <div class="no-jobs">
+                        <i class="fas fa-inbox"></i>
+                        <p>Nenhum job encontrado. Faça upload de um arquivo Excel para começar!</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Job Details Modal -->
+    <div class="modal" id="jobModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalJobTitle">Detalhes do Job</h2>
+                <button class="modal-close" onclick="closeModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="modalJobDetails">
+                Loading...
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    
+    <!-- Debug script -->
+    <script>
+        // Log on page load
+        window.addEventListener('load', () => {
+            const checkbox = document.getElementById('useStealthMode');
+            console.log('Page loaded. Stealth checkbox checked:', checkbox.checked);
+        });
+    </script>
+</body>
+</html>
+
+

@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-01-28
+
+### Fixed
+- **Critical**: Enhanced anti-bot detection evasion for ANBIMA website
+- ChromeDriver being detected and killed by anti-bot systems
+- Repeated connection failures due to bot detection
+
+### Added
+- Enhanced stealth measures to avoid automation detection:
+  - Disable `AutomationControlled` blink feature
+  - Exclude automation switches
+  - Override `navigator.webdriver` property
+  - CDP command to set realistic user agent
+  - Auto-detect Chrome version to avoid mismatch
+- Warning in UI when headless mode is enabled
+- Increased delays between actions (8-15 seconds vs 5-10 seconds)
+
+### Changed
+- **Headless mode now defaults to FALSE** (OFF) in UI
+- Longer delays between actions to appear more human
+- More realistic browser fingerprint
+- Enhanced logging for anti-bot detection issues
+- Recommend non-headless mode for better success rate
+
+### Why This Matters
+ANBIMA's anti-bot system was detecting and blocking the scraper,
+causing repeated ChromeDriver crashes. Enhanced stealth measures
+make the scraper appear more like a real human user.
+
+**Important**: Headless mode is MORE likely to be detected. For best
+results, run with headless mode disabled (visible browser window).
+
 ## [1.0.3] - 2026-01-28
 
 ### Fixed
