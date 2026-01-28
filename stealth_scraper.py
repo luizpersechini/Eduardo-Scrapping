@@ -541,8 +541,11 @@ class StealthANBIMAScraper:
         }
 
         max_retries = getattr(config, 'MAX_RETRIES', 3)
+        max_timeout = getattr(config, 'MAX_CNPJ_TIMEOUT', 180)
 
         for attempt in range(max_retries):
+            attempt_start_time = time.time()
+
             try:
                 # Check if driver is still alive, attempt recovery if not
                 if not self.is_driver_alive():
@@ -560,7 +563,10 @@ class StealthANBIMAScraper:
                     result["Status"] = "Rate limited"
                     return result
 
-                # Step 1: Search for fund
+                # Step 1: Search for fund (with timeout check)
+                if time.time() - attempt_start_time > max_timeout:
+                    raise Exception(f"Timeout exceeded ({max_timeout}s)")
+
                 success, message = self.search_fund(cnpj)
                 if not success:
                     result["Status"] = message
@@ -571,11 +577,17 @@ class StealthANBIMAScraper:
                     result["Status"] = "Rate limited"
                     return result
 
-                # Step 2: Get fund name
+                # Step 2: Get fund name (with timeout check)
+                if time.time() - attempt_start_time > max_timeout:
+                    raise Exception(f"Timeout exceeded ({max_timeout}s)")
+
                 fund_name = self.get_fund_name()
                 result["Nome do Fundo"] = fund_name if fund_name else "N/A"
 
-                # Step 3: Navigate to periodic data page
+                # Step 3: Navigate to periodic data page (with timeout check)
+                if time.time() - attempt_start_time > max_timeout:
+                    raise Exception(f"Timeout exceeded ({max_timeout}s)")
+
                 success, message = self.navigate_to_periodic_data()
                 if not success:
                     result["Status"] = message
@@ -586,7 +598,10 @@ class StealthANBIMAScraper:
                     result["Status"] = "Rate limited"
                     return result
 
-                # Step 4: Extract periodic data
+                # Step 4: Extract periodic data (with timeout check)
+                if time.time() - attempt_start_time > max_timeout:
+                    raise Exception(f"Timeout exceeded ({max_timeout}s)")
+
                 success, data, message = self.extract_periodic_data()
                 if not success:
                     result["Status"] = message

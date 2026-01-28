@@ -74,6 +74,7 @@ CHROME_OPTIONS = [
 # Retry configuration
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds
+MAX_CNPJ_TIMEOUT = 180  # Maximum time per CNPJ (3 minutes)
 
 # Stealth mode settings
 STEALTH_MODE = True  # Enabled by default for anti-spam compliance

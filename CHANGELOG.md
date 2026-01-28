@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-01-28
+
+### Fixed
+- **Critical**: Scraper hanging at 83% progress - added per-CNPJ timeout protection (3 minutes max)
+- **Critical**: UI becoming unresponsive with white overlay - improved exception handling with try/catch per CNPJ
+- Individual CNPJ failures no longer stop entire scraping process
+- Added graceful degradation - partial results are always saved
+- Improved error messages in activity log (truncated to 50 chars)
+- Always close scraper properly even if errors occur (finally block)
+
+### Added
+- Per-CNPJ timeout protection (MAX_CNPJ_TIMEOUT = 180 seconds)
+- Timeout checks at each scraping step (search, get name, navigate, extract)
+- Individual CNPJ exception handling to prevent cascade failures
+- Better progress tracking continues even when individual CNPJs fail
+
+### Changed
+- Exception handling now wraps each CNPJ individually
+- Process results even if some CNPJs failed
+- Display warnings instead of errors for non-critical issues
+
 ## [1.0.0] - 2026-01-27
 
 ### Added

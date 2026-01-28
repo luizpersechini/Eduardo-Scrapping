@@ -246,6 +246,7 @@ if st.session_state.scraping_in_progress:
         log_placeholder = st.empty()
 
     # Run scraping
+    scraper = None
     try:
         # Initialize scraper
         if use_stealth:
@@ -264,25 +265,38 @@ if st.session_state.scraping_in_progress:
         total = len(st.session_state.cnpjs)
 
         for idx, cnpj in enumerate(st.session_state.cnpjs, 1):
-            # Update status
-            with status_container:
-                st.info(f"🔄 Scraping: {cnpj} ({idx}/{total})")
+            try:
+                # Update status
+                with status_container:
+                    st.info(f"🔄 Scraping: {cnpj} ({idx}/{total})")
 
-            # Scrape
-            result = scraper.scrape_fund_data(cnpj)
-            results.append(result)
+                # Scrape with timeout protection
+                result = scraper.scrape_fund_data(cnpj)
+                results.append(result)
 
-            # Update counters
-            if result.get('Status') == 'Success':
-                st.session_state.success_count += 1
-                message = f"✅ {cnpj} - Success ({len(result.get('periodic_data', []))} data points)"
-                st.session_state.status_messages.append(message)
-            else:
+                # Update counters
+                if result.get('Status') == 'Success':
+                    st.session_state.success_count += 1
+                    message = f"✅ {cnpj} - Success ({len(result.get('periodic_data', []))} data points)"
+                    st.session_state.status_messages.append(message)
+                else:
+                    st.session_state.failed_count += 1
+                    message = f"❌ {cnpj} - {result.get('Status', 'Failed')}"
+                    st.session_state.status_messages.append(message)
+
+            except Exception as e:
+                # Handle individual CNPJ failures
                 st.session_state.failed_count += 1
-                message = f"❌ {cnpj} - {result.get('Status', 'Failed')}"
+                message = f"❌ {cnpj} - Error: {str(e)[:50]}"
                 st.session_state.status_messages.append(message)
+                results.append({
+                    "CNPJ": cnpj,
+                    "Nome do Fundo": "N/A",
+                    "periodic_data": [],
+                    "Status": f"Error: {str(e)[:50]}"
+                })
 
-            # Update progress
+            # Update progress (even if CNPJ failed)
             st.session_state.progress = idx / total
             progress_bar.progress(st.session_state.progress)
 
@@ -304,14 +318,14 @@ if st.session_state.scraping_in_progress:
                 for msg in st.session_state.status_messages[-10:]:
                     st.text(msg)
 
-        # Close scraper
-        scraper.close()
-
-        # Process results
+        # Process results (even if some failed)
         if results:
-            processor = DataProcessor()
-            output_df = processor.process_scraped_data(results)
-            st.session_state.results = output_df
+            try:
+                processor = DataProcessor()
+                output_df = processor.process_scraped_data(results)
+                st.session_state.results = output_df
+            except Exception as e:
+                st.warning(f"⚠️ Warning: Could not process all results - {str(e)}")
 
         # Mark as complete
         st.session_state.scraping_in_progress = False
@@ -322,10 +336,14 @@ if st.session_state.scraping_in_progress:
     except Exception as e:
         st.error(f"❌ Error during scraping: {str(e)}")
         st.session_state.scraping_in_progress = False
-        try:
-            scraper.close()
-        except:
-            pass
+
+    finally:
+        # Always close the scraper, even if there was an error
+        if scraper:
+            try:
+                scraper.close()
+            except Exception as e:
+                st.warning(f"⚠️ Warning: Could not close scraper properly - {str(e)}")
 
 # Results section
 if st.session_state.results is not None and not st.session_state.scraping_in_progress:
