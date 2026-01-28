@@ -44,42 +44,94 @@ class StealthANBIMAScraper:
         """Initialize Undetected ChromeDriver"""
         try:
             options = uc.ChromeOptions()
-            
+
             # Add basic options (skip potentially problematic ones for undetected-chromedriver)
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-gpu')
             options.add_argument('--window-size=1920,1080')
             options.add_argument('--disable-features=VizDisplayCompositor')
+
+            # Options to keep browser stable in background/sleep
+            options.add_argument('--disable-background-timer-throttling')
+            options.add_argument('--disable-backgrounding-occluded-windows')
+            options.add_argument('--disable-renderer-backgrounding')
+            options.add_argument('--disable-hang-monitor')
+            options.add_argument('--disable-prompt-on-repost')
+            options.add_argument('--disable-domain-reliability')
+            options.add_argument('--disable-component-update')
+
+            # Keep process alive
+            options.add_argument('--disable-features=TranslateUI')
+            options.add_argument('--disable-ipc-flooding-protection')
+
             # Don't add --headless here, undetected-chromedriver handles it
             # Don't add --disable-blink-features, it conflicts with UC
             # Don't add --disable-web-security or --allow-running-insecure-content, they crash UC
-            
-            # Initialize undetected ChromeDriver
+
+            # Initialize undetected ChromeDriver with keep_alive
             # Auto-detect Chrome version (will match current installation)
             self.driver = uc.Chrome(
                 options=options,
-                headless=self.headless
+                headless=self.headless,
+                use_subprocess=False  # Keep driver alive in same process
             )
-            
+
             # Set timeouts
             self.driver.set_page_load_timeout(config.PAGE_LOAD_TIMEOUT)
             self.driver.implicitly_wait(config.IMPLICIT_WAIT)
-            
+
             # Initialize WebDriverWait
             self.wait = WebDriverWait(self.driver, config.ELEMENT_WAIT_TIMEOUT)
-            
+
             self.logger.info("Stealth WebDriver initialized successfully")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"Failed to initialize Stealth WebDriver: {str(e)}")
             return False
     
+    def is_driver_alive(self) -> bool:
+        """Check if the WebDriver is still responsive"""
+        try:
+            # Try to get current URL as a simple ping
+            _ = self.driver.current_url
+            return True
+        except Exception as e:
+            self.logger.warning(f"Driver not responsive: {str(e)}")
+            return False
+
+    def recover_driver(self) -> bool:
+        """Attempt to recover the driver connection"""
+        try:
+            self.logger.info("Attempting to recover driver connection...")
+
+            # Close the dead driver if possible
+            try:
+                if self.driver:
+                    self.driver.quit()
+            except:
+                pass
+
+            # Reinitialize
+            time.sleep(2)
+            success = self.setup_driver()
+
+            if success:
+                self.logger.info("Driver recovered successfully")
+            else:
+                self.logger.error("Failed to recover driver")
+
+            return success
+
+        except Exception as e:
+            self.logger.error(f"Error during driver recovery: {str(e)}")
+            return False
+
     def human_delay(self, min_sec: float = None, max_sec: float = None):
         """
         Random delay to simulate human behavior
-        
+
         Args:
             min_sec: Minimum delay in seconds (default from config)
             max_sec: Maximum delay in seconds (default from config)
@@ -88,7 +140,7 @@ class StealthANBIMAScraper:
             min_sec = getattr(config, 'STEALTH_MIN_DELAY', 3.0)
         if max_sec is None:
             max_sec = getattr(config, 'STEALTH_MAX_DELAY', 7.0)
-        
+
         delay = random.uniform(min_sec, max_sec)
         time.sleep(delay)
         self.logger.debug(f"Human delay: {delay:.2f}s")
@@ -473,7 +525,7 @@ class StealthANBIMAScraper:
 
     def scrape_fund_data(self, cnpj: str) -> Dict:
         """
-        Complete scraping workflow for a single CNPJ with stealth mode
+        Complete scraping workflow for a single CNPJ with stealth mode and automatic recovery
 
         Args:
             cnpj: The CNPJ to scrape
@@ -488,53 +540,88 @@ class StealthANBIMAScraper:
             "Status": "Unknown error"
         }
 
-        try:
-            # Check for rate limiting before starting
-            if self.is_rate_limited():
-                result["Status"] = "Rate limited"
+        max_retries = getattr(config, 'MAX_RETRIES', 3)
+
+        for attempt in range(max_retries):
+            try:
+                # Check if driver is still alive, attempt recovery if not
+                if not self.is_driver_alive():
+                    self.logger.warning(f"Driver not alive for {cnpj}, attempting recovery (attempt {attempt + 1}/{max_retries})")
+                    if not self.recover_driver():
+                        if attempt < max_retries - 1:
+                            time.sleep(config.RETRY_DELAY)
+                            continue
+                        else:
+                            result["Status"] = "Driver connection lost"
+                            return result
+
+                # Check for rate limiting before starting
+                if self.is_rate_limited():
+                    result["Status"] = "Rate limited"
+                    return result
+
+                # Step 1: Search for fund
+                success, message = self.search_fund(cnpj)
+                if not success:
+                    result["Status"] = message
+                    return result
+
+                # Check for rate limiting after search
+                if self.is_rate_limited():
+                    result["Status"] = "Rate limited"
+                    return result
+
+                # Step 2: Get fund name
+                fund_name = self.get_fund_name()
+                result["Nome do Fundo"] = fund_name if fund_name else "N/A"
+
+                # Step 3: Navigate to periodic data page
+                success, message = self.navigate_to_periodic_data()
+                if not success:
+                    result["Status"] = message
+                    return result
+
+                # Check for rate limiting after navigation
+                if self.is_rate_limited():
+                    result["Status"] = "Rate limited"
+                    return result
+
+                # Step 4: Extract periodic data
+                success, data, message = self.extract_periodic_data()
+                if not success:
+                    result["Status"] = message
+                    return result
+
+                result["periodic_data"] = data
+                result["Status"] = "Success"
+
                 return result
 
-            # Step 1: Search for fund
-            success, message = self.search_fund(cnpj)
-            if not success:
-                result["Status"] = message
-                return result
+            except WebDriverException as e:
+                # Driver connection issues - try to recover
+                self.logger.warning(f"WebDriver exception for {cnpj} (attempt {attempt + 1}/{max_retries}): {str(e)}")
 
-            # Check for rate limiting after search
-            if self.is_rate_limited():
-                result["Status"] = "Rate limited"
-                return result
+                if attempt < max_retries - 1:
+                    self.logger.info(f"Retrying {cnpj} after driver error...")
+                    if not self.recover_driver():
+                        time.sleep(config.RETRY_DELAY)
+                    continue
+                else:
+                    result["Status"] = f"WebDriver error after {max_retries} attempts"
+                    return result
 
-            # Step 2: Get fund name
-            fund_name = self.get_fund_name()
-            result["Nome do Fundo"] = fund_name if fund_name else "N/A"
+            except Exception as e:
+                self.logger.error(f"Error in scrape_fund_data for {cnpj} (attempt {attempt + 1}/{max_retries}): {str(e)}")
 
-            # Step 3: Navigate to periodic data page
-            success, message = self.navigate_to_periodic_data()
-            if not success:
-                result["Status"] = message
-                return result
+                if attempt < max_retries - 1:
+                    self.logger.info(f"Retrying {cnpj} after error...")
+                    time.sleep(config.RETRY_DELAY)
+                    continue
+                else:
+                    result["Status"] = f"Error: {str(e)}"
+                    return result
 
-            # Check for rate limiting after navigation
-            if self.is_rate_limited():
-                result["Status"] = "Rate limited"
-                return result
-
-            # Step 4: Extract periodic data
-            success, data, message = self.extract_periodic_data()
-            if not success:
-                result["Status"] = message
-                return result
-
-            result["periodic_data"] = data
-            result["Status"] = "Success"
-
-            return result
-
-        except Exception as e:
-            self.logger.error(f"Error in scrape_fund_data for {cnpj}: {str(e)}")
-            result["Status"] = f"Error: {str(e)}"
-            return result
+        return result
     
     def close(self):
         """Close the browser and clean up"""

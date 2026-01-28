@@ -208,7 +208,7 @@ if st.session_state.scraping_in_progress:
 
     # Activity log
     with st.expander("📜 Activity Log", expanded=True):
-        log_container = st.container()
+        log_placeholder = st.empty()
 
     # Run scraping
     try:
@@ -264,7 +264,7 @@ if st.session_state.scraping_in_progress:
                     st.metric("Time Elapsed", f"{elapsed/60:.1f} min")
 
             # Update activity log
-            with log_container:
+            with log_placeholder.container():
                 # Show last 10 messages only
                 for msg in st.session_state.status_messages[-10:]:
                     st.text(msg)
