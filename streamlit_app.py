@@ -10,6 +10,7 @@ from datetime import datetime
 import time
 import logging
 from pathlib import Path
+import hashlib
 
 # Import existing scrapers
 from stealth_scraper import StealthANBIMAScraper
@@ -23,6 +24,46 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Login credentials (hashed password)
+USERNAME = "eduardo"
+PASSWORD_HASH = "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"  # "password" - CHANGE THIS!
+
+def check_password(password):
+    """Check if password matches the stored hash"""
+    return hashlib.sha256(password.encode()).hexdigest() == PASSWORD_HASH
+
+def login_page():
+    """Display login page"""
+    st.title("🔐 ANBIMA Fund Data Scraper")
+    st.markdown("---")
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+        st.subheader("Login")
+
+        username = st.text_input("Username", key="login_username")
+        password = st.text_input("Password", type="password", key="login_password")
+
+        if st.button("Login", type="primary", use_container_width=True):
+            if username == USERNAME and check_password(password):
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("❌ Invalid username or password")
+
+        st.markdown("---")
+        st.caption("🔒 Secure access to ANBIMA scraper")
+
+# Check authentication
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+
+# Show login page if not authenticated
+if not st.session_state.authenticated:
+    login_page()
+    st.stop()
 
 # Initialize session state
 if 'scraping_in_progress' not in st.session_state:
@@ -72,6 +113,12 @@ with st.sidebar:
     """)
 
     st.markdown("---")
+
+    # Logout button
+    if st.button("🚪 Logout", use_container_width=True):
+        st.session_state.authenticated = False
+        st.rerun()
+
     st.caption("Phase 1 & 2 Anti-spam Active")
 
 # Main content
