@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-01-28
+
+### Fixed
+- **Critical**: ChromeDriver connection refused errors - "Max retries exceeded with url: /session/..."
+- **Critical**: Driver crashes causing entire batch to fail
+- Connection loss detection and automatic recovery mid-scraping
+- Improved driver health checks (test both URL and title)
+- Longer wait time (5s) before driver recovery for stability
+
+### Added
+- `safe_driver_operation()` wrapper for automatic connection recovery
+- All driver operations now wrapped with connection error detection
+- Specific error detection for "connection refused" and "max retries exceeded"
+- Driver recovery attempts before every critical operation
+- Verification that recovered driver is responsive before continuing
+
+### Changed
+- Driver recovery now waits 5 seconds instead of 2 seconds
+- Multiple driver health checks before operations
+- Each scraping step (search, get name, navigate, extract) wrapped with recovery logic
+- Better error messages distinguish connection errors from other failures
+
+### Technical Details
+- Detects: "connection refused", "max retries exceeded", "cannot call" errors
+- Auto-recovery: Up to 2 attempts per operation with driver reinitization
+- Health verification: Tests both `current_url` and `title` properties
+- Clean shutdown: Forces driver.quit() and clears references before recovery
+
 ## [1.0.2] - 2026-01-28
 
 ### Added

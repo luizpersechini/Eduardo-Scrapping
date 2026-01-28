@@ -93,12 +93,21 @@ class StealthANBIMAScraper:
     
     def is_driver_alive(self) -> bool:
         """Check if the WebDriver is still responsive"""
+        if not self.driver:
+            return False
+
         try:
-            # Try to get current URL as a simple ping
+            # Try multiple checks to ensure driver is alive
             _ = self.driver.current_url
+            _ = self.driver.title
             return True
         except Exception as e:
-            self.logger.warning(f"Driver not responsive: {str(e)}")
+            error_str = str(e).lower()
+            # Check for connection refused errors
+            if 'connection refused' in error_str or 'max retries exceeded' in error_str:
+                self.logger.error(f"ChromeDriver connection lost: {str(e)}")
+            else:
+                self.logger.warning(f"Driver not responsive: {str(e)}")
             return False
 
     def recover_driver(self) -> bool:
@@ -106,27 +115,80 @@ class StealthANBIMAScraper:
         try:
             self.logger.info("Attempting to recover driver connection...")
 
-            # Close the dead driver if possible
+            # Force close the dead driver
             try:
                 if self.driver:
                     self.driver.quit()
-            except:
-                pass
+                    self.logger.info("Closed dead driver")
+            except Exception as e:
+                self.logger.warning(f"Could not close dead driver cleanly: {str(e)}")
+
+            # Clear driver reference
+            self.driver = None
+            self.wait = None
+
+            # Wait longer before reinitializing
+            self.logger.info("Waiting before reinitializing driver...")
+            time.sleep(5)
 
             # Reinitialize
-            time.sleep(2)
             success = self.setup_driver()
 
             if success:
                 self.logger.info("Driver recovered successfully")
+                # Test the new driver
+                if self.is_driver_alive():
+                    self.logger.info("New driver verified as responsive")
+                    return True
+                else:
+                    self.logger.error("New driver is not responsive")
+                    return False
             else:
                 self.logger.error("Failed to recover driver")
-
-            return success
+                return False
 
         except Exception as e:
             self.logger.error(f"Error during driver recovery: {str(e)}")
             return False
+
+    def safe_driver_operation(self, operation_func, operation_name: str, max_attempts: int = 2):
+        """
+        Safely execute a driver operation with connection recovery
+
+        Args:
+            operation_func: Function to execute
+            operation_name: Name of the operation for logging
+            max_attempts: Maximum number of attempts (including recovery)
+
+        Returns:
+            Result of operation_func or raises exception on final failure
+        """
+        for attempt in range(max_attempts):
+            try:
+                # Check driver health before operation
+                if not self.is_driver_alive():
+                    self.logger.warning(f"{operation_name}: Driver not alive, attempting recovery...")
+                    if not self.recover_driver():
+                        raise WebDriverException("Driver recovery failed")
+
+                # Execute the operation
+                return operation_func()
+
+            except (WebDriverException, Exception) as e:
+                error_str = str(e).lower()
+                is_connection_error = ('connection refused' in error_str or
+                                     'max retries exceeded' in error_str or
+                                     'cannot call' in error_str)
+
+                if is_connection_error and attempt < max_attempts - 1:
+                    self.logger.warning(f"{operation_name}: Connection error (attempt {attempt+1}/{max_attempts}), recovering...")
+                    if self.recover_driver():
+                        continue  # Retry the operation
+                    else:
+                        self.logger.error(f"{operation_name}: Recovery failed")
+
+                # Re-raise on final attempt or non-connection errors
+                raise
 
     def human_delay(self, min_sec: float = None, max_sec: float = None):
         """
@@ -563,11 +625,14 @@ class StealthANBIMAScraper:
                     result["Status"] = "Rate limited"
                     return result
 
-                # Step 1: Search for fund (with timeout check)
+                # Step 1: Search for fund (with timeout check and connection recovery)
                 if time.time() - attempt_start_time > max_timeout:
                     raise Exception(f"Timeout exceeded ({max_timeout}s)")
 
-                success, message = self.search_fund(cnpj)
+                success, message = self.safe_driver_operation(
+                    lambda: self.search_fund(cnpj),
+                    f"Search fund {cnpj}"
+                )
                 if not success:
                     result["Status"] = message
                     return result
@@ -577,18 +642,24 @@ class StealthANBIMAScraper:
                     result["Status"] = "Rate limited"
                     return result
 
-                # Step 2: Get fund name (with timeout check)
+                # Step 2: Get fund name (with timeout check and connection recovery)
                 if time.time() - attempt_start_time > max_timeout:
                     raise Exception(f"Timeout exceeded ({max_timeout}s)")
 
-                fund_name = self.get_fund_name()
+                fund_name = self.safe_driver_operation(
+                    lambda: self.get_fund_name(),
+                    f"Get fund name {cnpj}"
+                )
                 result["Nome do Fundo"] = fund_name if fund_name else "N/A"
 
-                # Step 3: Navigate to periodic data page (with timeout check)
+                # Step 3: Navigate to periodic data page (with timeout check and connection recovery)
                 if time.time() - attempt_start_time > max_timeout:
                     raise Exception(f"Timeout exceeded ({max_timeout}s)")
 
-                success, message = self.navigate_to_periodic_data()
+                success, message = self.safe_driver_operation(
+                    lambda: self.navigate_to_periodic_data(),
+                    f"Navigate to periodic data {cnpj}"
+                )
                 if not success:
                     result["Status"] = message
                     return result
@@ -598,11 +669,14 @@ class StealthANBIMAScraper:
                     result["Status"] = "Rate limited"
                     return result
 
-                # Step 4: Extract periodic data (with timeout check)
+                # Step 4: Extract periodic data (with timeout check and connection recovery)
                 if time.time() - attempt_start_time > max_timeout:
                     raise Exception(f"Timeout exceeded ({max_timeout}s)")
 
-                success, data, message = self.extract_periodic_data()
+                success, data, message = self.safe_driver_operation(
+                    lambda: self.extract_periodic_data(),
+                    f"Extract periodic data {cnpj}"
+                )
                 if not success:
                     result["Status"] = message
                     return result
