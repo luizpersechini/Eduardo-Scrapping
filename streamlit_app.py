@@ -12,11 +12,46 @@ import logging
 from pathlib import Path
 import hashlib
 import subprocess
+import traceback
+import sys
 
 # Import existing scrapers
 from stealth_scraper import StealthANBIMAScraper
 from data_processor import DataProcessor
 import config
+
+# Setup logging to capture all events
+LOG_DIR = Path("session_logs")
+LOG_DIR.mkdir(exist_ok=True)
+
+def setup_session_logger():
+    """Setup a session-specific logger that writes to file"""
+    session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = LOG_DIR / f"scraping_session_{session_id}.log"
+
+    # Create logger
+    logger = logging.getLogger(f"session_{session_id}")
+    logger.setLevel(logging.DEBUG)
+
+    # Avoid duplicate handlers
+    if not logger.handlers:
+        # File handler
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+    return logger, log_file
+
+# Initialize session logger if not already done
+if 'session_logger' not in st.session_state:
+    st.session_state.session_logger, st.session_state.log_file = setup_session_logger()
+    st.session_state.session_logger.info("="*80)
+    st.session_state.session_logger.info("NEW SCRAPING SESSION STARTED")
+    st.session_state.session_logger.info(f"Version: {APP_VERSION if 'APP_VERSION' in dir() else 'Unknown'}")
+    st.session_state.session_logger.info(f"Timestamp: {datetime.now().isoformat()}")
+    st.session_state.session_logger.info("="*80)
 
 # Version info
 def get_version_info():
@@ -143,6 +178,34 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # Session log viewer
+    st.header("📋 Session Log")
+    if st.session_state.log_file.exists():
+        log_size = st.session_state.log_file.stat().st_size / 1024
+        st.caption(f"Log file: {log_size:.1f} KB")
+
+        with st.expander("View Recent Logs", expanded=False):
+            try:
+                # Read last 50 lines of log
+                log_content = st.session_state.log_file.read_text(encoding='utf-8')
+                log_lines = log_content.split('\n')
+                recent_logs = '\n'.join(log_lines[-50:])
+                st.text_area("Recent Activity", recent_logs, height=300, disabled=True)
+            except Exception as e:
+                st.error(f"Could not read log: {str(e)}")
+
+        if st.button("📥 Download Session Log", use_container_width=True):
+            log_content = st.session_state.log_file.read_text(encoding='utf-8')
+            st.download_button(
+                label="Save Log File",
+                data=log_content,
+                file_name=st.session_state.log_file.name,
+                mime="text/plain",
+                use_container_width=True
+            )
+
+    st.markdown("---")
+
     # Logout button
     if st.button("🚪 Logout", use_container_width=True):
         st.session_state.authenticated = False
@@ -180,12 +243,18 @@ with col2:
                 st.session_state.cnpjs = df['CNPJ'].tolist()
                 st.metric("CNPJs Loaded", len(st.session_state.cnpjs))
                 st.success("✅ File validated")
+                st.session_state.session_logger.info(f"File uploaded: {uploaded_file.name}")
+                st.session_state.session_logger.info(f"CNPJs loaded: {len(st.session_state.cnpjs)}")
+                st.session_state.session_logger.debug(f"CNPJ list: {st.session_state.cnpjs}")
             else:
                 st.error("❌ Missing 'CNPJ' column")
                 st.session_state.cnpjs = []
+                st.session_state.session_logger.error(f"File missing CNPJ column: {uploaded_file.name}")
         except Exception as e:
             st.error(f"❌ Error reading file: {str(e)}")
             st.session_state.cnpjs = []
+            st.session_state.session_logger.error(f"Error reading file: {str(e)}")
+            st.session_state.session_logger.debug(traceback.format_exc())
     else:
         st.info("Upload file to see stats")
 
@@ -218,6 +287,16 @@ if st.session_state.cnpjs and not st.session_state.scraping_in_progress:
             st.session_state.failed_count = 0
             st.session_state.status_messages = []
             st.session_state.start_time = time.time()
+
+            # Log scraping start
+            st.session_state.session_logger.info("="*80)
+            st.session_state.session_logger.info("SCRAPING STARTED")
+            st.session_state.session_logger.info(f"Total CNPJs: {len(st.session_state.cnpjs)}")
+            st.session_state.session_logger.info(f"Stealth Mode: {use_stealth}")
+            st.session_state.session_logger.info(f"Headless Mode: {headless}")
+            st.session_state.session_logger.info(f"Start Time: {datetime.now().isoformat()}")
+            st.session_state.session_logger.info("="*80)
+
             st.rerun()
 
     with col2:
@@ -256,15 +335,22 @@ if st.session_state.scraping_in_progress:
             scraper = ANBIMAScraper(headless=headless)
 
         if not scraper.setup_driver():
-            st.error("❌ Failed to initialize web driver")
+            error_msg = "Failed to initialize web driver"
+            st.error(f"❌ {error_msg}")
+            st.session_state.session_logger.error(error_msg)
             st.session_state.scraping_in_progress = False
             st.stop()
+
+        st.session_state.session_logger.info("WebDriver initialized successfully")
 
         # Process CNPJs
         results = []
         total = len(st.session_state.cnpjs)
 
         for idx, cnpj in enumerate(st.session_state.cnpjs, 1):
+            cnpj_start_time = time.time()
+            st.session_state.session_logger.info(f"[{idx}/{total}] Starting CNPJ: {cnpj}")
+
             try:
                 # Update status
                 with status_container:
@@ -274,26 +360,39 @@ if st.session_state.scraping_in_progress:
                 result = scraper.scrape_fund_data(cnpj)
                 results.append(result)
 
+                cnpj_elapsed = time.time() - cnpj_start_time
+
                 # Update counters
                 if result.get('Status') == 'Success':
                     st.session_state.success_count += 1
-                    message = f"✅ {cnpj} - Success ({len(result.get('periodic_data', []))} data points)"
+                    data_points = len(result.get('periodic_data', []))
+                    message = f"✅ {cnpj} - Success ({data_points} data points)"
                     st.session_state.status_messages.append(message)
+                    st.session_state.session_logger.info(f"[{idx}/{total}] SUCCESS: {cnpj} - {data_points} data points - {cnpj_elapsed:.1f}s")
                 else:
                     st.session_state.failed_count += 1
-                    message = f"❌ {cnpj} - {result.get('Status', 'Failed')}"
+                    status = result.get('Status', 'Failed')
+                    message = f"❌ {cnpj} - {status}"
                     st.session_state.status_messages.append(message)
+                    st.session_state.session_logger.warning(f"[{idx}/{total}] FAILED: {cnpj} - Status: {status} - {cnpj_elapsed:.1f}s")
 
             except Exception as e:
+                cnpj_elapsed = time.time() - cnpj_start_time
                 # Handle individual CNPJ failures
                 st.session_state.failed_count += 1
-                message = f"❌ {cnpj} - Error: {str(e)[:50]}"
+                error_short = str(e)[:50]
+                message = f"❌ {cnpj} - Error: {error_short}"
                 st.session_state.status_messages.append(message)
+
+                # Log full error details
+                st.session_state.session_logger.error(f"[{idx}/{total}] EXCEPTION: {cnpj} - {str(e)} - {cnpj_elapsed:.1f}s")
+                st.session_state.session_logger.debug(f"Traceback:\n{traceback.format_exc()}")
+
                 results.append({
                     "CNPJ": cnpj,
                     "Nome do Fundo": "N/A",
                     "periodic_data": [],
-                    "Status": f"Error: {str(e)[:50]}"
+                    "Status": f"Error: {error_short}"
                 })
 
             # Update progress (even if CNPJ failed)
@@ -321,20 +420,40 @@ if st.session_state.scraping_in_progress:
         # Process results (even if some failed)
         if results:
             try:
+                st.session_state.session_logger.info(f"Processing {len(results)} results...")
                 processor = DataProcessor()
                 output_df = processor.process_scraped_data(results)
                 st.session_state.results = output_df
+                st.session_state.session_logger.info(f"Results processed successfully - {len(output_df)} rows")
             except Exception as e:
                 st.warning(f"⚠️ Warning: Could not process all results - {str(e)}")
+                st.session_state.session_logger.error(f"Error processing results: {str(e)}")
+                st.session_state.session_logger.debug(traceback.format_exc())
+
+        # Calculate final stats
+        total_time = time.time() - st.session_state.start_time if st.session_state.start_time else 0
 
         # Mark as complete
         st.session_state.scraping_in_progress = False
         status_container.success("✅ Scraping Complete!")
 
+        # Log completion
+        st.session_state.session_logger.info("="*80)
+        st.session_state.session_logger.info("SCRAPING COMPLETED")
+        st.session_state.session_logger.info(f"Total CNPJs: {total}")
+        st.session_state.session_logger.info(f"Successful: {st.session_state.success_count}")
+        st.session_state.session_logger.info(f"Failed: {st.session_state.failed_count}")
+        st.session_state.session_logger.info(f"Total Time: {total_time/60:.2f} minutes")
+        st.session_state.session_logger.info(f"Avg Time per CNPJ: {total_time/total:.1f} seconds")
+        st.session_state.session_logger.info("="*80)
+
         st.rerun()
 
     except Exception as e:
-        st.error(f"❌ Error during scraping: {str(e)}")
+        error_msg = f"Error during scraping: {str(e)}"
+        st.error(f"❌ {error_msg}")
+        st.session_state.session_logger.error(error_msg)
+        st.session_state.session_logger.debug(f"Full traceback:\n{traceback.format_exc()}")
         st.session_state.scraping_in_progress = False
 
     finally:
@@ -342,8 +461,11 @@ if st.session_state.scraping_in_progress:
         if scraper:
             try:
                 scraper.close()
+                st.session_state.session_logger.info("WebDriver closed successfully")
             except Exception as e:
-                st.warning(f"⚠️ Warning: Could not close scraper properly - {str(e)}")
+                warning_msg = f"Could not close scraper properly - {str(e)}"
+                st.warning(f"⚠️ Warning: {warning_msg}")
+                st.session_state.session_logger.warning(warning_msg)
 
 # Results section
 if st.session_state.results is not None and not st.session_state.scraping_in_progress:
@@ -372,7 +494,7 @@ if st.session_state.results is not None and not st.session_state.scraping_in_pro
     st.subheader("📊 Results Preview")
     st.dataframe(st.session_state.results.head(10), width="stretch")
 
-    # Download button
+    # Download buttons
     st.subheader("📥 Download Results")
 
     # Prepare Excel file
@@ -383,7 +505,7 @@ if st.session_state.results is not None and not st.session_state.scraping_in_pro
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"anbima_results_{timestamp}.xlsx"
 
-    col1, col2 = st.columns([1, 3])
+    col1, col2, col3 = st.columns([1, 1, 2])
 
     with col1:
         st.download_button(
@@ -396,7 +518,21 @@ if st.session_state.results is not None and not st.session_state.scraping_in_pro
         )
 
     with col2:
-        st.info(f"📄 File: {filename} | Size: {len(output_buffer.getvalue())/1024:.1f} KB")
+        # Prepare log file for download
+        if st.session_state.log_file.exists():
+            log_content = st.session_state.log_file.read_text(encoding='utf-8')
+            log_filename = st.session_state.log_file.name
+
+            st.download_button(
+                label="📋 Download Log",
+                data=log_content,
+                file_name=log_filename,
+                mime="text/plain",
+                use_container_width=True
+            )
+
+    with col3:
+        st.info(f"📄 Excel: {len(output_buffer.getvalue())/1024:.1f} KB | 📋 Log: {st.session_state.log_file.stat().st_size/1024:.1f} KB")
 
     # New scraping button
     if st.button("🔄 Start New Scraping", use_container_width=False):

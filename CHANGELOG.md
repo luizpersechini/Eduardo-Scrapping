@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-01-28
+
+### Added
+- **Comprehensive session logging** - Every scraping session now creates a detailed log file
+- **Downloadable log files** - Users can download session logs for troubleshooting
+- **Real-time log viewer** - View recent logs in sidebar (last 50 lines)
+- **Per-CNPJ timing** - Logs show exact time taken for each CNPJ
+- **Full error tracebacks** - Complete stack traces logged for all errors
+- **Session statistics** - Detailed summary logged at start and completion
+
+### Logging Details
+- Log files saved to `session_logs/` directory
+- Filename format: `scraping_session_YYYYMMDD_HHMMSS.log`
+- Captures: file uploads, driver initialization, CNPJ progress, success/failures, errors, completion stats
+- Includes timestamps, log levels (INFO, WARNING, ERROR, DEBUG)
+- Download button available in results section and sidebar
+- Log file size displayed in UI
+
+### Why This Helps
+- Users without Streamlit admin access can now capture and share logs
+- Detailed diagnostics for "lost connection" and hanging issues
+- Complete audit trail of every scraping session
+- Easy to share logs with support for debugging
+
 ## [1.0.1] - 2026-01-28
 
 ### Fixed

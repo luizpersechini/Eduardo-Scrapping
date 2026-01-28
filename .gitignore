@@ -32,6 +32,8 @@ wheels/
 
 # Project specific
 logs/
+session_logs/
+*.log
 output_*.xlsx
 chromedriver*
 
