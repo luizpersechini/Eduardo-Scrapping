@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-01-28
+
+### Fixed
+- **Critical**: ChromeDriver initialization error "unrecognized chrome option: excludeSwitches"
+- Compatibility issue with undetected-chromedriver on Streamlit Cloud
+- Removed experimental_option calls that conflict with undetected-chromedriver
+
+### Changed
+- Simplified Chrome options for better compatibility
+- Let undetected-chromedriver handle automation hiding internally
+- Removed manual experimental_option settings
+
+### Technical Note
+undetected-chromedriver manages automation hiding automatically.
+Manually setting experimental_options causes initialization failures
+on some Chrome/ChromeDriver versions. Removed to ensure compatibility.
+
 ## [1.0.4] - 2026-01-28
 
 ### Fixed

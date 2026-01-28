@@ -72,11 +72,12 @@ class StealthANBIMAScraper:
 
             # Enhanced anti-detection (avoid automation flags)
             options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            options.add_experimental_option('useAutomationExtension', False)
 
             # More realistic user agent (avoid Chrome Headless detection)
             options.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+
+            # Note: undetected-chromedriver handles experimental_options internally
+            # Manually setting them can cause "unrecognized chrome option" errors
 
             # Don't add --headless here, undetected-chromedriver handles it
             # Don't add --disable-web-security or --allow-running-insecure-content, they crash UC
