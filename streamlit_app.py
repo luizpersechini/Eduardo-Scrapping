@@ -27,7 +27,7 @@ st.set_page_config(
 
 # Login credentials (hashed password)
 USERNAME = "eduardo"
-PASSWORD_HASH = "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"  # "password" - CHANGE THIS!
+PASSWORD_HASH = "66d2bed9c29bd80dbbd578f6219a1b9003383e047955e0ba445498ac62e6a796"  # Secure random password
 
 def check_password(password):
     """Check if password matches the stored hash"""
@@ -107,9 +107,9 @@ with st.sidebar:
 
     **Features:**
     - ✅ Anti-spam protection
-    - ✅ Real-time progress
-    - ✅ 36 validated CNPJs
-    - ✅ Excel export
+    - ✅ Real-time progress tracking
+    - ✅ Stealth mode enabled
+    - ✅ Excel import/export
     """)
 
     st.markdown("---")
@@ -134,19 +134,7 @@ with col1:
         help="Upload Excel file with 'CNPJ' column"
     )
 
-    # Template download
-    if st.button("📥 Download Template (36 Valid CNPJs)"):
-        template_path = Path("input_valid_cnpjs.xlsx")
-        if template_path.exists():
-            with open(template_path, 'rb') as f:
-                st.download_button(
-                    label="⬇️ Click to Download",
-                    data=f,
-                    file_name="input_valid_cnpjs.xlsx",
-                    mime="application/vnd.ms-excel"
-                )
-        else:
-            st.error("Template file not found. Please use your own CNPJ list.")
+    st.info("💡 **File format:** Excel file (.xlsx or .xls) with a column named 'CNPJ' containing the business tax IDs to scrape.")
 
 with col2:
     st.header("📊 Quick Stats")
