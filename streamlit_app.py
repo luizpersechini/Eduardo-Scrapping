@@ -11,11 +11,36 @@ import time
 import logging
 from pathlib import Path
 import hashlib
+import subprocess
 
 # Import existing scrapers
 from stealth_scraper import StealthANBIMAScraper
 from data_processor import DataProcessor
 import config
+
+# Version info
+def get_version_info():
+    """Get version and git commit info"""
+    try:
+        # Read version from VERSION file
+        version_file = Path(__file__).parent / "VERSION"
+        version = version_file.read_text().strip() if version_file.exists() else "Unknown"
+
+        # Try to get git commit hash
+        try:
+            commit = subprocess.check_output(
+                ['git', 'rev-parse', '--short', 'HEAD'],
+                cwd=Path(__file__).parent,
+                stderr=subprocess.DEVNULL
+            ).decode('utf-8').strip()
+        except:
+            commit = "N/A"
+
+        return version, commit
+    except:
+        return "Unknown", "N/A"
+
+APP_VERSION, GIT_COMMIT = get_version_info()
 
 # Configure page
 st.set_page_config(
@@ -84,7 +109,11 @@ if 'start_time' not in st.session_state:
     st.session_state.start_time = None
 
 # Header
-st.title("🏦 ANBIMA Fund Data Scraper")
+col_title, col_version = st.columns([4, 1])
+with col_title:
+    st.title("🏦 ANBIMA Fund Data Scraper")
+with col_version:
+    st.markdown(f"<div style='text-align: right; padding-top: 20px;'><code>v{APP_VERSION}</code></div>", unsafe_allow_html=True)
 st.markdown("---")
 
 # Sidebar
@@ -119,7 +148,13 @@ with st.sidebar:
         st.session_state.authenticated = False
         st.rerun()
 
+    st.markdown("---")
+
+    # Version info
     st.caption("Phase 1 & 2 Anti-spam Active")
+    st.caption(f"Version: {APP_VERSION}")
+    if GIT_COMMIT != "N/A":
+        st.caption(f"Build: {GIT_COMMIT}")
 
 # Main content
 col1, col2 = st.columns([2, 1])
