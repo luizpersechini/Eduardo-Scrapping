@@ -41,9 +41,14 @@ class StealthANBIMAScraper:
         self.rate_limit_count = 0
         
     def setup_driver(self):
-        """Initialize Undetected ChromeDriver"""
+        """Initialize Undetected ChromeDriver with enhanced anti-detection"""
         try:
             options = uc.ChromeOptions()
+
+            # CRITICAL: If headless mode, ANBIMA likely detects and blocks it
+            # Recommend running with headless=False for better success rate
+            if self.headless:
+                self.logger.warning("Headless mode enabled - may trigger anti-bot detection!")
 
             # Add basic options (skip potentially problematic ones for undetected-chromedriver)
             options.add_argument('--no-sandbox')
@@ -65,17 +70,33 @@ class StealthANBIMAScraper:
             options.add_argument('--disable-features=TranslateUI')
             options.add_argument('--disable-ipc-flooding-protection')
 
+            # Enhanced anti-detection (avoid automation flags)
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option('useAutomationExtension', False)
+
+            # More realistic user agent (avoid Chrome Headless detection)
+            options.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+
             # Don't add --headless here, undetected-chromedriver handles it
-            # Don't add --disable-blink-features, it conflicts with UC
             # Don't add --disable-web-security or --allow-running-insecure-content, they crash UC
 
-            # Initialize undetected ChromeDriver with keep_alive
-            # Auto-detect Chrome version (will match current installation)
+            # Initialize undetected ChromeDriver with enhanced stealth
+            # version_main parameter helps undetected-chromedriver be more stealthy
             self.driver = uc.Chrome(
                 options=options,
                 headless=self.headless,
-                use_subprocess=False  # Keep driver alive in same process
+                use_subprocess=False,  # Keep driver alive in same process
+                version_main=None  # Auto-detect to avoid version mismatch detection
             )
+
+            # Execute stealth scripts to further hide automation
+            self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+                "userAgent": 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            })
+
+            # Override navigator.webdriver flag
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
             # Set timeouts
             self.driver.set_page_load_timeout(config.PAGE_LOAD_TIMEOUT)
@@ -84,7 +105,7 @@ class StealthANBIMAScraper:
             # Initialize WebDriverWait
             self.wait = WebDriverWait(self.driver, config.ELEMENT_WAIT_TIMEOUT)
 
-            self.logger.info("Stealth WebDriver initialized successfully")
+            self.logger.info("Stealth WebDriver initialized successfully (enhanced anti-detection)")
             return True
 
         except Exception as e:
