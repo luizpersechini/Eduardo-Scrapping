@@ -273,7 +273,7 @@ if st.session_state.cnpjs:
 
     # Show first 10 CNPJs
     with st.expander(f"View {len(st.session_state.cnpjs)} CNPJs", expanded=False):
-        st.dataframe(preview_df, width="stretch")
+        st.dataframe(preview_df, use_container_width=True)
 
 # Scraping controls
 if st.session_state.cnpjs and not st.session_state.scraping_in_progress:
@@ -495,7 +495,7 @@ if st.session_state.results is not None and not st.session_state.scraping_in_pro
 
     # Results preview
     st.subheader("📊 Results Preview")
-    st.dataframe(st.session_state.results.head(10), width="stretch")
+    st.dataframe(st.session_state.results.head(10), use_container_width=True)
 
     # Download buttons
     st.subheader("📥 Download Results")
