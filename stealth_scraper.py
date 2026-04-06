@@ -6,10 +6,46 @@ Handles web scraping of fund data from ANBIMA website with stealth mode to avoid
 import time
 import random
 import logging
+import subprocess
+import re
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
 import undetected_chromedriver as uc
+
+
+def get_chrome_version() -> int:
+    """Detect installed Chrome major version at runtime"""
+    # Try all known Chrome paths
+    chrome_paths = [
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+    ]
+
+    # Also try what undetected-chromedriver finds
+    try:
+        chrome_paths.insert(0, uc.find_chrome_executable())
+    except:
+        pass
+
+    for path in chrome_paths:
+        if not path:
+            continue
+        try:
+            out = subprocess.check_output(
+                [path, '--version'], stderr=subprocess.DEVNULL
+            ).decode()
+            # Full version like "Google Chrome 145.0.7632.77"
+            match = re.search(r'(\d+)\.', out)
+            if match:
+                version = int(match.group(1))
+                return version
+        except:
+            continue
+
+    return None  # Let UC auto-detect if all else fails
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
@@ -50,45 +86,38 @@ class StealthANBIMAScraper:
             if self.headless:
                 self.logger.warning("Headless mode enabled - may trigger anti-bot detection!")
 
-            # Add basic options (skip potentially problematic ones for undetected-chromedriver)
+            # Basic stability options
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-gpu')
             options.add_argument('--window-size=1920,1080')
-            options.add_argument('--disable-features=VizDisplayCompositor')
 
-            # Options to keep browser stable in background/sleep
+            # Combine all --disable-features into ONE flag (duplicate flags cause Chrome errors)
+            options.add_argument('--disable-features=VizDisplayCompositor,TranslateUI')
+
+            # Keep browser stable in background/sleep
             options.add_argument('--disable-background-timer-throttling')
             options.add_argument('--disable-backgrounding-occluded-windows')
             options.add_argument('--disable-renderer-backgrounding')
             options.add_argument('--disable-hang-monitor')
-            options.add_argument('--disable-prompt-on-repost')
-            options.add_argument('--disable-domain-reliability')
-            options.add_argument('--disable-component-update')
-
-            # Keep process alive
-            options.add_argument('--disable-features=TranslateUI')
             options.add_argument('--disable-ipc-flooding-protection')
 
-            # Enhanced anti-detection (avoid automation flags)
+            # Anti-detection
             options.add_argument('--disable-blink-features=AutomationControlled')
-
-            # More realistic user agent (avoid Chrome Headless detection)
-            options.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-
-            # Note: undetected-chromedriver handles experimental_options internally
-            # Manually setting them can cause "unrecognized chrome option" errors
 
             # Don't add --headless here, undetected-chromedriver handles it
             # Don't add --disable-web-security or --allow-running-insecure-content, they crash UC
 
-            # Initialize undetected ChromeDriver with enhanced stealth
-            # version_main parameter helps undetected-chromedriver be more stealthy
+            # Detect Chrome version to avoid ChromeDriver mismatch
+            chrome_version = get_chrome_version()
+            self.logger.info(f"Detected Chrome version: {chrome_version}")
+
+            # Initialize undetected ChromeDriver with matching version
             self.driver = uc.Chrome(
                 options=options,
                 headless=self.headless,
-                use_subprocess=False,  # Keep driver alive in same process
-                version_main=None  # Auto-detect to avoid version mismatch detection
+                use_subprocess=False,
+                version_main=chrome_version  # Match installed Chrome version exactly
             )
 
             # Execute stealth scripts to further hide automation
