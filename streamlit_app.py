@@ -3,6 +3,7 @@ ANBIMA Fund Data Scraper - Web UI
 Simple web interface for scraping ANBIMA fund data
 """
 
+import os
 import streamlit as st
 import pandas as pd
 import io
@@ -158,10 +159,15 @@ with st.sidebar:
     use_stealth = st.checkbox("Stealth Mode", value=True,
                               help="Use undetected ChromeDriver to avoid bot detection (Recommended)")
 
-    headless = st.checkbox("Headless Mode", value=False,
-                          help="Run browser without GUI (faster, but MORE likely to be detected by anti-bot)")
+    # On Streamlit Cloud there is no display, so headless must be enabled
+    is_cloud = os.environ.get("STREAMLIT_SHARING_MODE") or os.environ.get("IS_STREAMLIT_CLOUD")
+    headless = st.checkbox("Headless Mode", value=bool(is_cloud),
+                          help="Run browser without GUI. Automatically enabled on Streamlit Cloud.",
+                          disabled=bool(is_cloud))
 
-    if headless:
+    if is_cloud:
+        st.info("ℹ️ Headless mode is required on Streamlit Cloud and has been enabled automatically.")
+    elif headless:
         st.warning("⚠️ Headless mode may trigger anti-bot detection. If scraping fails repeatedly, disable headless mode.")
 
     num_workers = st.selectbox("Workers", options=[1, 2], index=0,
