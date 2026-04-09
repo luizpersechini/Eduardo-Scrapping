@@ -143,6 +143,8 @@ if 'failed_count' not in st.session_state:
     st.session_state.failed_count = 0
 if 'start_time' not in st.session_state:
     st.session_state.start_time = None
+if 'stop_scraping' not in st.session_state:
+    st.session_state.stop_scraping = False
 
 # Header
 col_title, col_version = st.columns([4, 1])
@@ -291,6 +293,7 @@ if st.session_state.cnpjs and not st.session_state.scraping_in_progress:
     with col1:
         if st.button("🚀 Start Scraping", type="primary", width='stretch'):
             st.session_state.scraping_in_progress = True
+            st.session_state.stop_scraping = False
             st.session_state.progress = 0
             st.session_state.success_count = 0
             st.session_state.failed_count = 0
@@ -319,6 +322,10 @@ if st.session_state.cnpjs and not st.session_state.scraping_in_progress:
 if st.session_state.scraping_in_progress:
     st.markdown("---")
     st.header("📊 Scraping Progress")
+
+    # Stop button
+    if st.button("🛑 Stop Scraping", type="secondary", width='stretch'):
+        st.session_state.stop_scraping = True
 
     # Progress bar
     progress_bar = st.progress(st.session_state.progress)
@@ -357,6 +364,13 @@ if st.session_state.scraping_in_progress:
         total = len(st.session_state.cnpjs)
 
         for idx, cnpj in enumerate(st.session_state.cnpjs, 1):
+            # Check if user requested stop
+            if st.session_state.stop_scraping:
+                st.session_state.session_logger.info(f"Scraping stopped by user at CNPJ {idx}/{total}")
+                with status_container:
+                    st.warning(f"⚠️ Scraping stopped by user after {idx - 1}/{total} CNPJs")
+                break
+
             cnpj_start_time = time.time()
             st.session_state.session_logger.info(f"[{idx}/{total}] Starting CNPJ: {cnpj}")
 
@@ -444,7 +458,11 @@ if st.session_state.scraping_in_progress:
 
         # Mark as complete
         st.session_state.scraping_in_progress = False
-        status_container.success("✅ Scraping Complete!")
+        if st.session_state.stop_scraping:
+            status_container.warning("⚠️ Scraping Stopped by User")
+            st.session_state.stop_scraping = False
+        else:
+            status_container.success("✅ Scraping Complete!")
 
         # Log completion
         st.session_state.session_logger.info("="*80)
