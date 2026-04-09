@@ -12,9 +12,6 @@ import re
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
-import undetected_chromedriver as uc
-
-
 def get_chrome_version() -> int:
     """Detect installed Chrome major version at runtime"""
     # Try all known Chrome paths
@@ -27,6 +24,7 @@ def get_chrome_version() -> int:
 
     # Also try what undetected-chromedriver finds
     try:
+        import undetected_chromedriver as uc
         chrome_paths.insert(0, uc.find_chrome_executable())
     except:
         pass
@@ -80,6 +78,7 @@ class StealthANBIMAScraper:
     def setup_driver(self):
         """Initialize Undetected ChromeDriver with enhanced anti-detection"""
         try:
+            import undetected_chromedriver as uc
             options = uc.ChromeOptions()
 
             # CRITICAL: If headless mode, ANBIMA likely detects and blocks it
