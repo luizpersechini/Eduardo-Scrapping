@@ -161,7 +161,7 @@ with st.sidebar:
 
     # On Streamlit Cloud there is no display, so headless must be enabled
     is_cloud = os.environ.get("STREAMLIT_SHARING_MODE") or os.environ.get("IS_STREAMLIT_CLOUD")
-    headless = st.checkbox("Headless Mode", value=bool(is_cloud),
+    headless = st.checkbox("Headless Mode", value=True,
                           help="Run browser without GUI. Automatically enabled on Streamlit Cloud.",
                           disabled=bool(is_cloud))
 
