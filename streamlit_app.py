@@ -107,7 +107,7 @@ def login_page():
         username = st.text_input("Username", key="login_username")
         password = st.text_input("Password", type="password", key="login_password")
 
-        if st.button("Login", type="primary", use_container_width=True):
+        if st.button("Login", type="primary", width='stretch'):
             if username == USERNAME and check_password(password):
                 st.session_state.authenticated = True
                 st.rerun()
@@ -203,20 +203,20 @@ with st.sidebar:
             except Exception as e:
                 st.error(f"Could not read log: {str(e)}")
 
-        if st.button("📥 Download Session Log", use_container_width=True):
+        if st.button("📥 Download Session Log", width='stretch'):
             log_content = st.session_state.log_file.read_text(encoding='utf-8')
             st.download_button(
                 label="Save Log File",
                 data=log_content,
                 file_name=st.session_state.log_file.name,
                 mime="text/plain",
-                use_container_width=True
+                width='stretch'
             )
 
     st.markdown("---")
 
     # Logout button
-    if st.button("🚪 Logout", use_container_width=True):
+    if st.button("🚪 Logout", width='stretch'):
         st.session_state.authenticated = False
         st.rerun()
 
@@ -279,7 +279,7 @@ if st.session_state.cnpjs:
 
     # Show first 10 CNPJs
     with st.expander(f"View {len(st.session_state.cnpjs)} CNPJs", expanded=False):
-        st.dataframe(preview_df, use_container_width=True)
+        st.dataframe(preview_df, width='stretch')
 
 # Scraping controls
 if st.session_state.cnpjs and not st.session_state.scraping_in_progress:
@@ -289,7 +289,7 @@ if st.session_state.cnpjs and not st.session_state.scraping_in_progress:
     col1, col2, col3 = st.columns([2, 1, 1])
 
     with col1:
-        if st.button("🚀 Start Scraping", type="primary", use_container_width=True):
+        if st.button("🚀 Start Scraping", type="primary", width='stretch'):
             st.session_state.scraping_in_progress = True
             st.session_state.progress = 0
             st.session_state.success_count = 0
@@ -501,7 +501,7 @@ if st.session_state.results is not None and not st.session_state.scraping_in_pro
 
     # Results preview
     st.subheader("📊 Results Preview")
-    st.dataframe(st.session_state.results.head(10), use_container_width=True)
+    st.dataframe(st.session_state.results.head(10), width='stretch')
 
     # Download buttons
     st.subheader("📥 Download Results")
@@ -523,7 +523,7 @@ if st.session_state.results is not None and not st.session_state.scraping_in_pro
             file_name=filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             type="primary",
-            use_container_width=True
+            width='stretch'
         )
 
     with col2:
@@ -537,14 +537,14 @@ if st.session_state.results is not None and not st.session_state.scraping_in_pro
                 data=log_content,
                 file_name=log_filename,
                 mime="text/plain",
-                use_container_width=True
+                width='stretch'
             )
 
     with col3:
         st.info(f"📄 Excel: {len(output_buffer.getvalue())/1024:.1f} KB | 📋 Log: {st.session_state.log_file.stat().st_size/1024:.1f} KB")
 
     # New scraping button
-    if st.button("🔄 Start New Scraping", use_container_width=False):
+    if st.button("🔄 Start New Scraping", width='content'):
         st.session_state.results = None
         st.session_state.cnpjs = []
         st.session_state.success_count = 0

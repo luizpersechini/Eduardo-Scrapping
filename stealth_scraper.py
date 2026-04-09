@@ -3,6 +3,7 @@ ANBIMA Fund Scraper using Undetected ChromeDriver
 Handles web scraping of fund data from ANBIMA website with stealth mode to avoid bot detection
 """
 
+import os
 import time
 import random
 import logging
@@ -112,13 +113,27 @@ class StealthANBIMAScraper:
             chrome_version = get_chrome_version()
             self.logger.info(f"Detected Chrome version: {chrome_version}")
 
+            # On Linux (e.g. Streamlit Cloud), use system chromedriver to avoid download failures
+            import platform
+            system_chromedriver = None
+            if platform.system() == 'Linux':
+                for candidate in ['/usr/bin/chromedriver', '/usr/lib/chromium-browser/chromedriver', '/usr/lib/chromium/chromedriver']:
+                    if os.path.exists(candidate):
+                        system_chromedriver = candidate
+                        self.logger.info(f"Using system chromedriver: {system_chromedriver}")
+                        break
+
             # Initialize undetected ChromeDriver with matching version
-            self.driver = uc.Chrome(
+            uc_kwargs = dict(
                 options=options,
                 headless=self.headless,
                 use_subprocess=False,
-                version_main=chrome_version  # Match installed Chrome version exactly
+                version_main=chrome_version,  # Match installed Chrome version exactly
             )
+            if system_chromedriver:
+                uc_kwargs['driver_executable_path'] = system_chromedriver
+
+            self.driver = uc.Chrome(**uc_kwargs)
 
             # Execute stealth scripts to further hide automation
             self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
