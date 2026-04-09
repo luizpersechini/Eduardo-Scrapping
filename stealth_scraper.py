@@ -113,13 +113,18 @@ class StealthANBIMAScraper:
             self.logger.info(f"Detected Chrome version: {chrome_version}")
 
             # On Linux (e.g. Streamlit Cloud), use system chromedriver to avoid download failures
+            # UC needs to patch the binary, so copy it to a writable location first
             import platform
+            import shutil
             system_chromedriver = None
             if platform.system() == 'Linux':
                 for candidate in ['/usr/bin/chromedriver', '/usr/lib/chromium-browser/chromedriver', '/usr/lib/chromium/chromedriver']:
                     if os.path.exists(candidate):
-                        system_chromedriver = candidate
-                        self.logger.info(f"Using system chromedriver: {system_chromedriver}")
+                        writable_path = '/tmp/chromedriver'
+                        shutil.copy2(candidate, writable_path)
+                        os.chmod(writable_path, 0o755)
+                        system_chromedriver = writable_path
+                        self.logger.info(f"Copied system chromedriver to {writable_path}")
                         break
 
             # Initialize undetected ChromeDriver with matching version
