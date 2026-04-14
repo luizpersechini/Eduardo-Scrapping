@@ -342,6 +342,9 @@ if st.session_state.scraping_in_progress:
 
     # Run scraping
     scraper = None
+    results = []
+    total = len(st.session_state.cnpjs)
+    was_interrupted = False
     try:
         # Initialize scraper
         if use_stealth:
@@ -359,16 +362,13 @@ if st.session_state.scraping_in_progress:
 
         st.session_state.session_logger.info("WebDriver initialized successfully")
 
-        # Process CNPJs
-        results = []
-        total = len(st.session_state.cnpjs)
-
         for idx, cnpj in enumerate(st.session_state.cnpjs, 1):
             # Check if user requested stop
             if st.session_state.stop_scraping:
                 st.session_state.session_logger.info(f"Scraping stopped by user at CNPJ {idx}/{total}")
                 with status_container:
                     st.warning(f"⚠️ Scraping stopped by user after {idx - 1}/{total} CNPJs")
+                was_interrupted = True
                 break
 
             cnpj_start_time = time.time()
@@ -440,7 +440,25 @@ if st.session_state.scraping_in_progress:
                 for msg in st.session_state.status_messages[-10:]:
                     st.text(msg)
 
-        # Process results (even if some failed)
+    except Exception as e:
+        error_msg = f"Error during scraping: {str(e)}"
+        st.error(f"❌ {error_msg}")
+        st.session_state.session_logger.error(error_msg)
+        st.session_state.session_logger.debug(f"Full traceback:\n{traceback.format_exc()}")
+        was_interrupted = True
+
+    finally:
+        # Always close the scraper, even if there was an error
+        if scraper:
+            try:
+                scraper.close()
+                st.session_state.session_logger.info("WebDriver closed successfully")
+            except Exception as e:
+                warning_msg = f"Could not close scraper properly - {str(e)}"
+                st.warning(f"⚠️ Warning: {warning_msg}")
+                st.session_state.session_logger.warning(warning_msg)
+
+        # Process results (even if some failed or scraping was interrupted)
         if results:
             try:
                 st.session_state.session_logger.info(f"Processing {len(results)} results...")
@@ -458,41 +476,28 @@ if st.session_state.scraping_in_progress:
 
         # Mark as complete
         st.session_state.scraping_in_progress = False
-        if st.session_state.stop_scraping:
-            status_container.warning("⚠️ Scraping Stopped by User")
+        if st.session_state.stop_scraping or was_interrupted:
+            if results:
+                status_container.warning(f"⚠️ Scraping interrupted — {len(results)} partial results saved. Download below.")
+            else:
+                status_container.warning("⚠️ Scraping interrupted before any results were collected")
             st.session_state.stop_scraping = False
         else:
             status_container.success("✅ Scraping Complete!")
 
         # Log completion
         st.session_state.session_logger.info("="*80)
-        st.session_state.session_logger.info("SCRAPING COMPLETED")
-        st.session_state.session_logger.info(f"Total CNPJs: {total}")
+        st.session_state.session_logger.info("SCRAPING ENDED")
+        st.session_state.session_logger.info(f"Total CNPJs requested: {total}")
+        st.session_state.session_logger.info(f"CNPJs processed: {len(results)}")
         st.session_state.session_logger.info(f"Successful: {st.session_state.success_count}")
         st.session_state.session_logger.info(f"Failed: {st.session_state.failed_count}")
         st.session_state.session_logger.info(f"Total Time: {total_time/60:.2f} minutes")
-        st.session_state.session_logger.info(f"Avg Time per CNPJ: {total_time/total:.1f} seconds")
+        if len(results) > 0:
+            st.session_state.session_logger.info(f"Avg Time per CNPJ: {total_time/len(results):.1f} seconds")
         st.session_state.session_logger.info("="*80)
 
         st.rerun()
-
-    except Exception as e:
-        error_msg = f"Error during scraping: {str(e)}"
-        st.error(f"❌ {error_msg}")
-        st.session_state.session_logger.error(error_msg)
-        st.session_state.session_logger.debug(f"Full traceback:\n{traceback.format_exc()}")
-        st.session_state.scraping_in_progress = False
-
-    finally:
-        # Always close the scraper, even if there was an error
-        if scraper:
-            try:
-                scraper.close()
-                st.session_state.session_logger.info("WebDriver closed successfully")
-            except Exception as e:
-                warning_msg = f"Could not close scraper properly - {str(e)}"
-                st.warning(f"⚠️ Warning: {warning_msg}")
-                st.session_state.session_logger.warning(warning_msg)
 
 # Results section
 if st.session_state.results is not None and not st.session_state.scraping_in_progress:
