@@ -114,13 +114,15 @@ class StealthANBIMAScraper:
 
             # On Linux (e.g. Streamlit Cloud), use system chromedriver to avoid download failures
             # UC needs to patch the binary, so copy it to a writable location first
+            # Use a unique path per session to avoid "Text file busy" if a previous Chrome still holds the file
             import platform
             import shutil
+            import uuid
             system_chromedriver = None
             if platform.system() == 'Linux':
                 for candidate in ['/usr/bin/chromedriver', '/usr/lib/chromium-browser/chromedriver', '/usr/lib/chromium/chromedriver']:
                     if os.path.exists(candidate):
-                        writable_path = '/tmp/chromedriver'
+                        writable_path = f'/tmp/chromedriver_{uuid.uuid4().hex[:8]}'
                         shutil.copy2(candidate, writable_path)
                         os.chmod(writable_path, 0o755)
                         system_chromedriver = writable_path
