@@ -146,6 +146,36 @@ if 'start_time' not in st.session_state:
 if 'stop_scraping' not in st.session_state:
     st.session_state.stop_scraping = False
 
+
+def kill_orphan_chrome():
+    """Force-kill any lingering chrome/chromedriver processes.
+
+    Orphan Chrome processes from a previous session are the #1 cause of
+    Streamlit Cloud's "Argh. This app has gone over its resource limits"
+    message — each instance holds ~500-700 MB of RAM and the container
+    ceiling is ~1 GB. We run this on session init and before every new
+    scraping run.
+    """
+    import platform
+    if platform.system() != 'Linux':
+        return
+    try:
+        for proc_name in ('chromedriver', 'chrome', 'chromium'):
+            subprocess.call(
+                ['pkill', '-9', '-f', proc_name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+    except Exception:
+        pass
+
+
+# Clean up any orphan Chrome processes left over from a previous (possibly
+# crashed) session. This runs once per new Streamlit session.
+if 'orphan_cleanup_done' not in st.session_state:
+    kill_orphan_chrome()
+    st.session_state.orphan_cleanup_done = True
+
 # Header
 col_title, col_version = st.columns([4, 1])
 with col_title:
@@ -216,6 +246,13 @@ with st.sidebar:
             )
 
     st.markdown("---")
+
+    # Recovery: kill any orphan Chrome processes leaking RAM.
+    # Use this if the app feels sluggish or scraping refuses to start.
+    if st.button("🧹 Kill Orphan Chrome", width='stretch',
+                 help="Force-kill any stuck Chrome/chromedriver processes from previous runs. Use if the app is slow or scraping fails to start."):
+        kill_orphan_chrome()
+        st.success("Chrome processes cleaned up.")
 
     # Logout button
     if st.button("🚪 Logout", width='stretch'):
@@ -292,6 +329,10 @@ if st.session_state.cnpjs and not st.session_state.scraping_in_progress:
 
     with col1:
         if st.button("🚀 Start Scraping", type="primary", width='stretch'):
+            # Kill any orphan Chrome processes from a previous run before starting,
+            # otherwise we risk tripping the Streamlit Cloud ~1 GB RAM ceiling.
+            kill_orphan_chrome()
+
             st.session_state.scraping_in_progress = True
             st.session_state.stop_scraping = False
             st.session_state.progress = 0
