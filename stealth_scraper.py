@@ -90,7 +90,15 @@ class StealthANBIMAScraper:
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-gpu')
-            options.add_argument('--window-size=1920,1080')
+            # Smaller window in cloud to reduce Chrome memory footprint (~1GB cap on Streamlit Cloud)
+            options.add_argument('--window-size=1280,900')
+            # Reduce memory pressure in constrained containers
+            options.add_argument('--disable-extensions')
+            options.add_argument('--disable-plugins')
+            options.add_argument('--disable-application-cache')
+            options.add_argument('--disable-translate')
+            options.add_argument('--memory-pressure-off')
+            options.add_argument('--js-flags=--max-old-space-size=256')
 
             # Combine all --disable-features into ONE flag (duplicate flags cause Chrome errors)
             options.add_argument('--disable-features=VizDisplayCompositor,TranslateUI')
@@ -785,13 +793,38 @@ class StealthANBIMAScraper:
         return result
     
     def close(self):
-        """Close the browser and clean up"""
+        """Close the browser and aggressively clean up any lingering processes.
+
+        On Streamlit Cloud (and any memory-constrained host) a Chrome process
+        that does not exit here will eat hundreds of MB and eventually trip
+        the container's RAM limit, which Streamlit Cloud surfaces as a crash
+        ("Argh. This app has gone over its resource limits").
+        """
+        # 1. Try graceful quit
         if self.driver:
             try:
                 self.driver.quit()
-                self.logger.info("Stealth WebDriver closed")
+                self.logger.info("Stealth WebDriver closed (graceful quit)")
             except Exception as e:
-                self.logger.error(f"Error closing WebDriver: {str(e)}")
+                self.logger.warning(f"driver.quit() failed, will force kill: {e}")
+            finally:
+                self.driver = None
+
+        # 2. Force-kill any orphan chrome/chromedriver processes on Linux.
+        # This protects against hangs where driver.quit() does not actually
+        # terminate the browser subprocess tree.
+        try:
+            import platform
+            if platform.system() == 'Linux':
+                for proc_name in ('chromedriver', 'chrome', 'chromium'):
+                    subprocess.call(
+                        ['pkill', '-9', '-f', proc_name],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                self.logger.info("Force-killed any lingering Chrome processes")
+        except Exception as e:
+            self.logger.warning(f"Orphan process cleanup failed: {e}")
     
     def __enter__(self):
         """Context manager entry"""
