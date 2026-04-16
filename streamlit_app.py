@@ -395,9 +395,22 @@ if st.session_state.scraping_in_progress:
             scraper = ANBIMAScraper(headless=headless)
 
         if not scraper.setup_driver():
-            error_msg = "Failed to initialize web driver"
-            st.error(f"❌ {error_msg}")
-            st.session_state.session_logger.error(error_msg)
+            # Surface the *actual* underlying error so we can diagnose remotely
+            # instead of just showing a generic "Failed to initialize web driver".
+            real_error = getattr(scraper, 'last_init_error', None) or 'Unknown error'
+            real_tb = getattr(scraper, 'last_init_traceback', None)
+            st.error(f"❌ Failed to initialize web driver:\n\n**{real_error}**")
+            with st.expander("🔧 Technical details (share this with the developer)"):
+                st.code(real_tb or real_error, language='text')
+                st.caption(
+                    "Common causes: Streamlit Cloud Chrome version mismatch, "
+                    "out-of-memory kill from a previous run (try the "
+                    "'Kill Orphan Chrome' button in the sidebar), or the app "
+                    "needs a hard reboot from the Streamlit Cloud dashboard."
+                )
+            st.session_state.session_logger.error(f"setup_driver failed: {real_error}")
+            if real_tb:
+                st.session_state.session_logger.debug(real_tb)
             st.session_state.scraping_in_progress = False
             st.stop()
 
