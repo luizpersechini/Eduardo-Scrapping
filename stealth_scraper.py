@@ -74,6 +74,10 @@ class StealthANBIMAScraper:
         self.headless = headless
         self.logger = logging.getLogger(__name__)
         self.rate_limit_count = 0
+        # Captures the last setup_driver() error so the UI can show real diagnostics
+        # instead of a generic "Failed to initialize web driver" message.
+        self.last_init_error: Optional[str] = None
+        self.last_init_traceback: Optional[str] = None
         
     def setup_driver(self):
         """Initialize Undetected ChromeDriver with enhanced anti-detection"""
@@ -92,13 +96,14 @@ class StealthANBIMAScraper:
             options.add_argument('--disable-gpu')
             # Smaller window in cloud to reduce Chrome memory footprint (~1GB cap on Streamlit Cloud)
             options.add_argument('--window-size=1280,900')
-            # Reduce memory pressure in constrained containers
+            # Reduce memory pressure in constrained containers (safe flags only)
             options.add_argument('--disable-extensions')
             options.add_argument('--disable-plugins')
             options.add_argument('--disable-application-cache')
             options.add_argument('--disable-translate')
             options.add_argument('--memory-pressure-off')
-            options.add_argument('--js-flags=--max-old-space-size=256')
+            # NOTE: do NOT set --js-flags=--max-old-space-size=256, it makes Chrome
+            # refuse to start on some sites (including ANBIMA's heavy SPA pages).
 
             # Combine all --disable-features into ONE flag (duplicate flags cause Chrome errors)
             options.add_argument('--disable-features=VizDisplayCompositor,TranslateUI')
@@ -168,7 +173,12 @@ class StealthANBIMAScraper:
             return True
 
         except Exception as e:
-            self.logger.error(f"Failed to initialize Stealth WebDriver: {str(e)}")
+            import traceback as _tb
+            tb_text = _tb.format_exc()
+            self.last_init_error = f"{type(e).__name__}: {str(e)}"
+            self.last_init_traceback = tb_text
+            self.logger.error(f"Failed to initialize Stealth WebDriver: {self.last_init_error}")
+            self.logger.debug(tb_text)
             return False
     
     def is_driver_alive(self) -> bool:
