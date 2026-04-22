@@ -78,107 +78,214 @@ class StealthANBIMAScraper:
         # instead of a generic "Failed to initialize web driver" message.
         self.last_init_error: Optional[str] = None
         self.last_init_traceback: Optional[str] = None
+        # Which driver strategy actually succeeded (for UI badge and logs).
+        self.driver_mode: Optional[str] = None
         
-    def setup_driver(self):
-        """Initialize Undetected ChromeDriver with enhanced anti-detection"""
+    # --------------------------------------------------------------
+    # Driver setup with UC + retry + plain-Selenium fallback
+    # --------------------------------------------------------------
+    def _log_environment(self):
+        """Log Chromium / chromedriver versions so any future version-mismatch
+        shows up clearly in Streamlit Cloud logs."""
+        import platform
+        self.logger.info(f"Platform: {platform.platform()}")
+        for path in ('/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'):
+            if os.path.exists(path):
+                try:
+                    out = subprocess.check_output([path, '--version'], stderr=subprocess.DEVNULL).decode().strip()
+                    self.logger.info(f"Browser at {path}: {out}")
+                except Exception:
+                    pass
+        for path in ('/usr/bin/chromedriver', '/usr/lib/chromium-browser/chromedriver', '/usr/lib/chromium/chromedriver'):
+            if os.path.exists(path):
+                try:
+                    out = subprocess.check_output([path, '--version'], stderr=subprocess.DEVNULL).decode().strip()
+                    self.logger.info(f"Chromedriver at {path}: {out}")
+                except Exception:
+                    pass
+
+    def _common_chrome_args(self):
+        """Chrome flags that are safe on both undetected-chromedriver and plain Selenium."""
+        return [
+            '--no-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--window-size=1280,900',
+            '--disable-extensions',
+            '--disable-plugins',
+            '--disable-application-cache',
+            '--disable-translate',
+            '--memory-pressure-off',
+            '--disable-features=VizDisplayCompositor,TranslateUI',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-hang-monitor',
+            '--disable-ipc-flooding-protection',
+            '--disable-blink-features=AutomationControlled',
+        ]
+
+    def _find_system_chromedriver_copy(self):
+        """On Linux, copy system chromedriver to a writable /tmp path so UC can patch it.
+        Returns the copy path or None."""
+        import platform
+        import shutil
+        import uuid
+        if platform.system() != 'Linux':
+            return None
+        for candidate in ('/usr/bin/chromedriver', '/usr/lib/chromium-browser/chromedriver', '/usr/lib/chromium/chromedriver'):
+            if os.path.exists(candidate):
+                writable_path = f'/tmp/chromedriver_{uuid.uuid4().hex[:8]}'
+                try:
+                    shutil.copy2(candidate, writable_path)
+                    os.chmod(writable_path, 0o755)
+                    self.logger.info(f"Copied system chromedriver {candidate} -> {writable_path}")
+                    return writable_path
+                except Exception as e:
+                    self.logger.warning(f"Could not copy {candidate}: {e}")
+        return None
+
+    def _try_undetected_chromedriver(self):
+        """First-choice driver: undetected-chromedriver (best anti-bot properties)."""
+        import undetected_chromedriver as uc
+        options = uc.ChromeOptions()
+        for arg in self._common_chrome_args():
+            options.add_argument(arg)
+
+        chrome_version = get_chrome_version()
+        self.logger.info(f"Detected Chrome major version: {chrome_version}")
+
+        system_chromedriver = self._find_system_chromedriver_copy()
+
+        uc_kwargs = dict(
+            options=options,
+            headless=self.headless,
+            use_subprocess=True,  # default; more reliable than False on Linux
+            version_main=chrome_version,
+        )
+        if system_chromedriver:
+            uc_kwargs['driver_executable_path'] = system_chromedriver
+
+        driver = uc.Chrome(**uc_kwargs)
+        return driver
+
+    def _try_plain_selenium(self):
+        """Fallback driver: plain Selenium + selenium-stealth.
+
+        Less anti-bot-strength than UC, but dramatically more reliable on
+        constrained cloud hosts like Streamlit Cloud because nothing is
+        patched or auto-downloaded — we just point at the system chromedriver.
+        """
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options as ChromeOptions
+        from selenium.webdriver.chrome.service import Service
+
+        options = ChromeOptions()
+        for arg in self._common_chrome_args():
+            options.add_argument(arg)
+        if self.headless:
+            options.add_argument('--headless=new')
+
+        # Find the system chromedriver (no copy/patch needed for plain Selenium)
+        chromedriver_path = None
+        for candidate in ('/usr/bin/chromedriver', '/usr/lib/chromium-browser/chromedriver', '/usr/lib/chromium/chromedriver'):
+            if os.path.exists(candidate):
+                chromedriver_path = candidate
+                break
+
+        # Also try to use the Chromium binary directly (Streamlit Cloud has /usr/bin/chromium)
+        for candidate in ('/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'):
+            if os.path.exists(candidate):
+                options.binary_location = candidate
+                break
+
+        service = Service(executable_path=chromedriver_path) if chromedriver_path else Service()
+        driver = webdriver.Chrome(service=service, options=options)
+
+        # Apply selenium-stealth on top for basic anti-bot hardening
         try:
-            import undetected_chromedriver as uc
-            options = uc.ChromeOptions()
-
-            # CRITICAL: If headless mode, ANBIMA likely detects and blocks it
-            # Recommend running with headless=False for better success rate
-            if self.headless:
-                self.logger.warning("Headless mode enabled - may trigger anti-bot detection!")
-
-            # Basic stability options
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--disable-gpu')
-            # Smaller window in cloud to reduce Chrome memory footprint (~1GB cap on Streamlit Cloud)
-            options.add_argument('--window-size=1280,900')
-            # Reduce memory pressure in constrained containers (safe flags only)
-            options.add_argument('--disable-extensions')
-            options.add_argument('--disable-plugins')
-            options.add_argument('--disable-application-cache')
-            options.add_argument('--disable-translate')
-            options.add_argument('--memory-pressure-off')
-            # NOTE: do NOT set --js-flags=--max-old-space-size=256, it makes Chrome
-            # refuse to start on some sites (including ANBIMA's heavy SPA pages).
-
-            # Combine all --disable-features into ONE flag (duplicate flags cause Chrome errors)
-            options.add_argument('--disable-features=VizDisplayCompositor,TranslateUI')
-
-            # Keep browser stable in background/sleep
-            options.add_argument('--disable-background-timer-throttling')
-            options.add_argument('--disable-backgrounding-occluded-windows')
-            options.add_argument('--disable-renderer-backgrounding')
-            options.add_argument('--disable-hang-monitor')
-            options.add_argument('--disable-ipc-flooding-protection')
-
-            # Anti-detection
-            options.add_argument('--disable-blink-features=AutomationControlled')
-
-            # Don't add --headless here, undetected-chromedriver handles it
-            # Don't add --disable-web-security or --allow-running-insecure-content, they crash UC
-
-            # Detect Chrome version to avoid ChromeDriver mismatch
-            chrome_version = get_chrome_version()
-            self.logger.info(f"Detected Chrome version: {chrome_version}")
-
-            # On Linux (e.g. Streamlit Cloud), use system chromedriver to avoid download failures
-            # UC needs to patch the binary, so copy it to a writable location first
-            # Use a unique path per session to avoid "Text file busy" if a previous Chrome still holds the file
-            import platform
-            import shutil
-            import uuid
-            system_chromedriver = None
-            if platform.system() == 'Linux':
-                for candidate in ['/usr/bin/chromedriver', '/usr/lib/chromium-browser/chromedriver', '/usr/lib/chromium/chromedriver']:
-                    if os.path.exists(candidate):
-                        writable_path = f'/tmp/chromedriver_{uuid.uuid4().hex[:8]}'
-                        shutil.copy2(candidate, writable_path)
-                        os.chmod(writable_path, 0o755)
-                        system_chromedriver = writable_path
-                        self.logger.info(f"Copied system chromedriver to {writable_path}")
-                        break
-
-            # Initialize undetected ChromeDriver with matching version
-            uc_kwargs = dict(
-                options=options,
-                headless=self.headless,
-                use_subprocess=False,
-                version_main=chrome_version,  # Match installed Chrome version exactly
+            from selenium_stealth import stealth
+            stealth(
+                driver,
+                languages=["en-US", "en"],
+                vendor="Google Inc.",
+                platform="Win32",
+                webgl_vendor="Intel Inc.",
+                renderer="Intel Iris OpenGL Engine",
+                fix_hairline=True,
             )
-            if system_chromedriver:
-                uc_kwargs['driver_executable_path'] = system_chromedriver
+            self.logger.info("Applied selenium-stealth on fallback driver")
+        except Exception as e:
+            self.logger.warning(f"selenium-stealth not applied: {e}")
 
-            self.driver = uc.Chrome(**uc_kwargs)
+        return driver
 
-            # Execute stealth scripts to further hide automation
+    def _apply_stealth_scripts(self):
+        """Inject CDP-level stealth tweaks on whichever driver we ended up with."""
+        try:
             self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
                 "userAgent": 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             })
-
-            # Override navigator.webdriver flag
+        except Exception as e:
+            self.logger.debug(f"CDP user-agent override skipped: {e}")
+        try:
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        except Exception as e:
+            self.logger.debug(f"navigator.webdriver override skipped: {e}")
 
-            # Set timeouts
+    def setup_driver(self):
+        """Initialize a WebDriver with retry + fallback.
+
+        Strategy:
+          1. Log environment (versions, paths) for diagnostics.
+          2. Try undetected-chromedriver, with ONE retry after a short delay
+             (handles transient UC patching failures).
+          3. If UC still fails, fall back to plain Selenium + selenium-stealth,
+             which is much more robust on Streamlit Cloud.
+        """
+        self._log_environment()
+
+        attempts = [
+            ('undetected-chromedriver', self._try_undetected_chromedriver),
+            ('undetected-chromedriver (retry)', self._try_undetected_chromedriver),
+            ('plain Selenium + selenium-stealth', self._try_plain_selenium),
+        ]
+
+        collected_errors = []
+        for label, strategy in attempts:
+            self.logger.info(f"Attempting WebDriver init via: {label}")
+            try:
+                self.driver = strategy()
+                self.driver_mode = label
+                break
+            except Exception as e:
+                import traceback as _tb
+                tb_text = _tb.format_exc()
+                collected_errors.append(f"[{label}] {type(e).__name__}: {str(e)}")
+                self.logger.error(f"{label} failed: {type(e).__name__}: {str(e)}")
+                self.logger.debug(tb_text)
+                time.sleep(2)  # short pause before next attempt
+        else:
+            # All attempts failed
+            self.last_init_error = " | ".join(collected_errors)
+            # Use the last traceback (most recent failure) for the detail panel
+            import traceback as _tb
+            self.last_init_traceback = _tb.format_exc()
+            return False
+
+        # One of the strategies succeeded. Finalise setup.
+        try:
+            self._apply_stealth_scripts()
             self.driver.set_page_load_timeout(config.PAGE_LOAD_TIMEOUT)
             self.driver.implicitly_wait(config.IMPLICIT_WAIT)
-
-            # Initialize WebDriverWait
             self.wait = WebDriverWait(self.driver, config.ELEMENT_WAIT_TIMEOUT)
-
-            self.logger.info("Stealth WebDriver initialized successfully (enhanced anti-detection)")
+            self.logger.info(f"WebDriver initialized successfully using: {self.driver_mode}")
             return True
-
         except Exception as e:
             import traceback as _tb
-            tb_text = _tb.format_exc()
-            self.last_init_error = f"{type(e).__name__}: {str(e)}"
-            self.last_init_traceback = tb_text
-            self.logger.error(f"Failed to initialize Stealth WebDriver: {self.last_init_error}")
-            self.logger.debug(tb_text)
+            self.last_init_error = f"Post-init setup failed ({self.driver_mode}): {type(e).__name__}: {str(e)}"
+            self.last_init_traceback = _tb.format_exc()
+            self.logger.error(self.last_init_error)
             return False
     
     def is_driver_alive(self) -> bool:

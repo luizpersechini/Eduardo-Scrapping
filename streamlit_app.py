@@ -414,7 +414,15 @@ if st.session_state.scraping_in_progress:
             st.session_state.scraping_in_progress = False
             st.stop()
 
-        st.session_state.session_logger.info("WebDriver initialized successfully")
+        # Show which driver strategy won, so we know at a glance whether we're
+        # on UC (preferred) or fell back to plain Selenium.
+        driver_mode = getattr(scraper, 'driver_mode', None)
+        if driver_mode:
+            if 'plain Selenium' in driver_mode:
+                st.info(f"ℹ️ WebDriver: **{driver_mode}** (UC unavailable — stealth level reduced)")
+            else:
+                st.success(f"✅ WebDriver: **{driver_mode}**")
+        st.session_state.session_logger.info(f"WebDriver initialized successfully via: {driver_mode}")
 
         for idx, cnpj in enumerate(st.session_state.cnpjs, 1):
             # Check if user requested stop
