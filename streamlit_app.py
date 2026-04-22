@@ -254,6 +254,55 @@ with st.sidebar:
         kill_orphan_chrome()
         st.success("Chrome processes cleaned up.")
 
+    # Diagnostic: try to launch Chromium directly and capture stderr.
+    # Use when "Failed to initialize web driver" errors persist — this tells us
+    # exactly why Chrome is refusing to start on this container.
+    if st.button("🔬 Diagnose Chrome", width='stretch',
+                 help="Run Chromium directly and capture its output. Use when scraping fails to start, to see the actual Chrome crash reason."):
+        import shutil as _shutil
+        diagnostics = []
+        for path in ('/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'):
+            if os.path.exists(path):
+                try:
+                    ver = subprocess.check_output([path, '--version'], stderr=subprocess.STDOUT, timeout=5).decode(errors='replace').strip()
+                    diagnostics.append(f"[{path}] version: {ver}")
+                except Exception as e:
+                    diagnostics.append(f"[{path}] --version FAILED: {e}")
+                # Try a minimal headless launch to see if Chrome can boot at all
+                try:
+                    proc = subprocess.run(
+                        [path, '--headless=new', '--no-sandbox', '--disable-gpu',
+                         '--disable-dev-shm-usage', '--dump-dom', 'about:blank'],
+                        capture_output=True, timeout=15,
+                    )
+                    diagnostics.append(f"[{path}] headless launch exit code: {proc.returncode}")
+                    if proc.stderr:
+                        tail = proc.stderr.decode(errors='replace')[-2000:]
+                        diagnostics.append(f"[{path}] stderr:\n{tail}")
+                except Exception as e:
+                    diagnostics.append(f"[{path}] headless launch FAILED: {e}")
+        for path in ('/usr/bin/chromedriver',):
+            if os.path.exists(path):
+                try:
+                    ver = subprocess.check_output([path, '--version'], stderr=subprocess.STDOUT, timeout=5).decode(errors='replace').strip()
+                    diagnostics.append(f"[{path}] version: {ver}")
+                except Exception as e:
+                    diagnostics.append(f"[{path}] --version FAILED: {e}")
+        # /dev/shm size (common culprit)
+        try:
+            shm = _shutil.disk_usage('/dev/shm')
+            diagnostics.append(f"/dev/shm total: {shm.total/1024/1024:.1f} MB, free: {shm.free/1024/1024:.1f} MB")
+        except Exception as e:
+            diagnostics.append(f"/dev/shm stat failed: {e}")
+        # Memory info
+        try:
+            with open('/proc/meminfo', 'r') as f:
+                lines = [l for l in f.readlines() if l.startswith(('MemTotal', 'MemFree', 'MemAvailable'))]
+                diagnostics.append('memory: ' + ' | '.join(l.strip() for l in lines))
+        except Exception as e:
+            diagnostics.append(f"/proc/meminfo failed: {e}")
+        st.code('\n'.join(diagnostics) or 'No diagnostics collected', language='text')
+
     # Logout button
     if st.button("🚪 Logout", width='stretch'):
         st.session_state.authenticated = False
