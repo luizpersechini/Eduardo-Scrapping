@@ -105,18 +105,24 @@ class StealthANBIMAScraper:
                     pass
 
     def _common_chrome_args(self):
-        """Chrome flags that are safe on both undetected-chromedriver and plain Selenium."""
+        """Chrome flags that are safe on both undetected-chromedriver and plain Selenium.
+
+        NOTE: previously included '--disable-features=VizDisplayCompositor,TranslateUI'.
+        Disabling VizDisplayCompositor is a known cause of Chrome-crashes-on-startup
+        in containerised Chromium 120+. Removed to fix "Chrome instance exited" on
+        Streamlit Cloud.
+        """
         return [
             '--no-sandbox',
             '--disable-dev-shm-usage',
             '--disable-gpu',
+            '--disable-software-rasterizer',
             '--window-size=1280,900',
             '--disable-extensions',
             '--disable-plugins',
             '--disable-application-cache',
             '--disable-translate',
             '--memory-pressure-off',
-            '--disable-features=VizDisplayCompositor,TranslateUI',
             '--disable-background-timer-throttling',
             '--disable-backgrounding-occluded-windows',
             '--disable-renderer-backgrounding',
@@ -199,8 +205,32 @@ class StealthANBIMAScraper:
                 options.binary_location = candidate
                 break
 
-        service = Service(executable_path=chromedriver_path) if chromedriver_path else Service()
-        driver = webdriver.Chrome(service=service, options=options)
+        # Capture chromedriver verbose log so if Chrome crashes, we know *why*.
+        self._chromedriver_log_path = '/tmp/chromedriver_last.log'
+        try:
+            # Selenium 4.10+ uses log_output; older uses log_path
+            service = Service(
+                executable_path=chromedriver_path,
+                log_output=self._chromedriver_log_path,
+                service_args=['--verbose'],
+            ) if chromedriver_path else Service(log_output=self._chromedriver_log_path, service_args=['--verbose'])
+        except TypeError:
+            service = Service(executable_path=chromedriver_path) if chromedriver_path else Service()
+
+        try:
+            driver = webdriver.Chrome(service=service, options=options)
+        except Exception as e:
+            # Attach chromedriver log to the exception so setup_driver surfaces it.
+            log_tail = ''
+            try:
+                if os.path.exists(self._chromedriver_log_path):
+                    with open(self._chromedriver_log_path, 'r', errors='replace') as lf:
+                        log_tail = ''.join(lf.readlines()[-80:])
+            except Exception:
+                pass
+            if log_tail:
+                raise Exception(f"{e}\n\n--- chromedriver log (last 80 lines) ---\n{log_tail}") from e
+            raise
 
         # Apply selenium-stealth on top for basic anti-bot hardening
         try:
