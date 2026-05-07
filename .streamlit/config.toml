@@ -1,8 +1,10 @@
 [theme]
-primaryColor = "#0066cc"
-backgroundColor = "#ffffff"
-secondaryBackgroundColor = "#f0f2f6"
-textColor = "#262730"
+# Cota palette — emerald accent on warm-neutral
+# (Streamlit doesn't accept oklch(), so these are sRGB approximations of the design tokens.)
+primaryColor = "#1c1c1c"            # near-black "fg" used for primary buttons in Cota
+backgroundColor = "#f7f6f1"         # warm-neutral bg  (oklch(0.985 0.005 90))
+secondaryBackgroundColor = "#f0eee7"# sunk surface     (oklch(0.965 0.006 90))
+textColor = "#262524"               # near-black fg    (oklch(0.22 0.01 60))
 font = "sans serif"
 
 [server]
