@@ -56,3 +56,7 @@ instance/
 Thumbs.db
 
 EDUARDO_CREDENTIALS.txt
+
+# Local tooling output (per-user, not shared)
+.claude/
+graphify-out/

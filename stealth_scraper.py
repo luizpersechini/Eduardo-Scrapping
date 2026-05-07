@@ -163,14 +163,36 @@ class StealthANBIMAScraper:
 
         system_chromedriver = self._find_system_chromedriver_copy()
 
-        uc_kwargs = dict(
-            options=options,
-            headless=self.headless,
-            use_subprocess=True,  # default; more reliable than False on Linux
-            version_main=chrome_version,
-        )
-        if system_chromedriver:
-            uc_kwargs['driver_executable_path'] = system_chromedriver
+        # Branch UC kwargs by host.
+        #
+        # On Linux (Streamlit Cloud) we need:
+        #   - system chromedriver path (UC can't download one)
+        #   - use_subprocess=True (more reliable in containers)
+        #
+        # On macOS/Windows we need:
+        #   - use_subprocess=False (the slow launch path on Mac causes the
+        #     window to die on first navigation → recovery loop)
+        #   - version_main=chrome_version still required, otherwise UC
+        #     auto-downloads the *latest* chromedriver which may be one
+        #     major version ahead of installed Chrome (e.g. driver 148
+        #     against Chrome 147 → SessionNotCreatedException).
+        import platform
+        if platform.system() == 'Linux':
+            uc_kwargs = dict(
+                options=options,
+                headless=self.headless,
+                use_subprocess=True,
+                version_main=chrome_version,
+            )
+            if system_chromedriver:
+                uc_kwargs['driver_executable_path'] = system_chromedriver
+        else:
+            uc_kwargs = dict(
+                options=options,
+                headless=self.headless,
+                use_subprocess=False,
+                version_main=chrome_version,
+            )
 
         driver = uc.Chrome(**uc_kwargs)
         return driver
