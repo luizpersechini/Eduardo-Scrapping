@@ -1,111 +1,119 @@
-# Deployment Guide - ANBIMA Fund Data Scraper
+# Deployment
 
-## 🚀 Quick Deployment to Streamlit Cloud
-
-### Prerequisites
-- GitHub account: `luizpersechini`
-- Repository: https://github.com/luizpersechini/Eduardo-Scrapping
-- Latest commit pushed to `main` branch
-
-### Deployment Steps
-
-1. **Go to Streamlit Cloud**
-   - Visit: https://share.streamlit.io/
-   - Sign in with GitHub account
-
-2. **Deploy New App** (or update existing)
-   - Click "New app" button
-   - Fill in the details:
-     - **Repository**: `luizpersechini/Eduardo-Scrapping`
-     - **Branch**: `main`
-     - **Main file path**: `streamlit_app.py`
-     - **App URL**: Custom URL (e.g., `eduardo-scrapping`)
-
-3. **Advanced Settings** (Recommended)
-   - Python version: **3.11** (recommended for stability)
-   - No environment variables needed (API keys disabled)
-
-4. **Deploy**
-   - Click "Deploy!" button
-   - Wait 2-5 minutes for deployment
-   - Monitor build logs for any issues
-
-### 📋 Current Version
-
-- **Version**: 1.0.0
-- **Latest Commit**: ff6da7b - "Add version control to UI"
-- **Previous Commit**: 17d0cc4 - "Fix background stability and activity log duplicates"
-
-### 🔑 Login Credentials
-
-Stored in: `EDUARDO_CREDENTIALS.txt` (gitignored)
-
-- **Username**: `eduardo`
-- **Password**: `ZNfXWn3UU7k13Vh9mqZAHg11qKwtYgAOTcNPgITk_Is`
-
-### ✅ Features Deployed
-
-- ✅ Login authentication with SHA-256 hashed password
-- ✅ Version control display (header + sidebar)
-- ✅ Activity log without duplicates
-- ✅ Background/sleep stability with auto-recovery
-- ✅ Stealth mode scraping with anti-spam
-- ✅ Excel upload/download
-- ✅ Real-time progress tracking
-- ✅ Automatic retry logic (up to 3 attempts)
-
-### 🔧 Technical Details
-
-**Dependencies**:
-- Python 3.11+
-- Streamlit >= 1.28.0
-- pandas >= 2.2.0
-- selenium == 4.15.2
-- undetected-chromedriver >= 3.5.5
-
-**Chrome Options for Background Stability**:
-- Disabled background throttling
-- Disabled renderer backgrounding
-- Keep-alive process management
-- Automatic driver recovery
-
-### 📊 Post-Deployment
-
-After successful deployment:
-- App will auto-redeploy on every push to `main` branch
-- Version number will update automatically from VERSION file
-- Git commit hash will show in sidebar
-
-### ⚠️ Troubleshooting
-
-**If deployment fails**:
-1. Check Python version (use 3.11, not 3.13)
-2. Review Streamlit Cloud build logs
-3. Verify all dependencies in requirements.txt
-4. Check for missing files in repository
-
-**Common Issues**:
-- **Chromium not found**: Streamlit Cloud provides Chromium automatically
-- **Module not found**: Check requirements.txt is up to date
-- **Build timeout**: May need to reduce dependencies or optimize imports
-
-### 🔄 Auto-Deployment
-
-The app is configured for automatic deployment:
-- Every push to `main` branch triggers redeployment
-- Can be paused in Streamlit Cloud dashboard settings
-- Build logs available in Streamlit Cloud interface
-
-### 📝 Version Management
-
-To update version:
-1. Edit `VERSION` file (e.g., change to `1.0.1`)
-2. Update `CHANGELOG.md` with changes
-3. Commit and push to GitHub
-4. Streamlit Cloud will auto-deploy with new version
+How to deploy / run Cota in each supported environment.
 
 ---
 
-**Repository**: https://github.com/luizpersechini/Eduardo-Scrapping  
-**Streamlit Cloud**: https://share.streamlit.io/  
-**Documentation**: See README.md, SECURITY.md, CHANGELOG.md
+## Streamlit Community Cloud (production)
+
+1. Push to `main` on GitHub. Streamlit Cloud is wired to auto-redeploy
+   from this branch.
+2. The cloud build:
+   - installs apt packages from `packages.txt`
+     (`chromium`, `chromium-driver`),
+   - installs Python deps from `requirements.txt`,
+   - reads theme tokens from `.streamlit/config.toml`.
+3. The first visitor after a redeploy may see a sleeping/cold-start
+   page — Streamlit Cloud hibernates apps after 12 h without traffic.
+   Click "Yes, get this app back up!" and wait ~30 s.
+
+### Cloud-specific runtime quirks (handled automatically)
+
+- The system `chromedriver` is read-only at `/usr/bin/chromedriver`.
+  `stealth_scraper.py` copies it to a per-session
+  `/tmp/chromedriver_<uuid>` so undetected-chromedriver can patch it.
+- `kill_orphan_chrome()` runs on session init and before every Start
+  to keep the container under the ~1 GB RAM ceiling.
+- `--disable-dev-shm-usage` is on by default; the cloud's `/dev/shm`
+  is too small for Chrome's default IPC.
+
+### Updating the deployment
+
+```
+git pull
+# make changes
+git add … && git commit -m "…" && git push origin main
+```
+
+Streamlit Cloud typically picks the new commit up within ~30 s. Watch
+the deploy log from the dashboard if a build fails.
+
+---
+
+## Local — macOS
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+Requires Google Chrome installed (the scraper drives a real browser).
+
+**Tip:** uncheck **Headless mode** in the Review panel. On macOS with
+Chrome 147+, headless mode causes the Chrome window to die on first
+navigation and triggers the recovery loop (~3× slowdown). A visible
+window is reliable.
+
+---
+
+## Local — Windows
+
+Double-click `run_windows.bat`. The launcher:
+
+- Verifies Python ≥ 3.11 is on PATH.
+- Verifies Google Chrome is installed.
+- Creates a `venv\` on first run and `pip install -r requirements.txt`.
+- Starts Streamlit and opens the default browser to `http://localhost:8501`.
+
+Full instructions are in `WINDOWS_SETUP.md`.
+
+---
+
+## CLI (no Streamlit)
+
+For scripted runs from the command line:
+
+```bash
+python main.py            # serial scrape
+python main_parallel.py   # parallel scrape (higher detection risk)
+
+python verify_results.py    # post-run verification
+python monitor_progress.py  # tail a running scrape
+```
+
+These read their inputs/outputs from disk; see each file's header
+docstring for the expected paths.
+
+---
+
+## Other hosts (Render, Fly.io, Railway, custom Docker)
+
+Streamlit Community Cloud has two limitations that may push you off it
+eventually:
+
+1. ~1 GB RAM ceiling — Chrome + Streamlit + pandas can hit this on
+   bigger CNPJ batches.
+2. 12-hour idle hibernation on the free tier.
+
+If you outgrow Cloud, the cleanest move is a small Docker image with
+your own Chrome version pinned. Render's free tier or a $5/mo Fly.io
+machine handle this comfortably. Outline:
+
+```dockerfile
+FROM python:3.13-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      chromium chromium-driver \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 8501
+CMD ["streamlit", "run", "streamlit_app.py", "--server.address=0.0.0.0"]
+```
+
+The Linux init path in `stealth_scraper.py` already handles
+`/usr/bin/chromedriver` and `/usr/bin/chromium` cleanly, so this works
+out of the box.

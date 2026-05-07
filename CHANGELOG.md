@@ -5,6 +5,83 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-05-07 — "Cota" redesign
+
+### Added
+- **Cota UI redesign** based on a Claude Design handoff bundle
+  (warm-neutral surface + emerald accent, Geist Sans/Mono).
+- New `cota_theme.py` module: global CSS + HTML helpers for brand
+  mark, sticky topbar, four-step stepper, CNPJ table, run summary,
+  progress hero (SVG ring + 6 KPI tiles), thin progress bar, live
+  activity feed (with shimmer for the in-flight CNPJ), success
+  circle, KPI row, result table, history rows, env rows.
+- **Phase-based flow** in the scrape route:
+  Upload → Review → Scrape → Done. Each phase is a self-contained
+  block; transitions advance `st.session_state.phase` and rerun.
+- **Stop scraping button** with partial-results preservation —
+  interrupting a run still produces a downloadable Excel of what
+  completed.
+- **History route** — lists every `session_logs/scraping_session_*.log`
+  with parsed run stats (date, CNPJ count, duration, success rate)
+  and a per-run log download.
+- **Settings route** — Chromium / chromedriver version detection,
+  `/dev/shm` and memory diagnostics, "Re-run diagnostics" runs a
+  real Chromium headless launch and surfaces stderr, "Kill orphan
+  Chrome" recovery button, workspace defaults (stealth / headless /
+  polite delay).
+- **WebDriver init retry + fallback chain** in
+  `stealth_scraper.setup_driver()`: undetected-chromedriver →
+  undetected-chromedriver retry → plain Selenium + selenium-stealth.
+  Each attempt's exception is collected and the final traceback is
+  surfaced verbatim in the UI.
+- **Orphan Chrome cleanup** runs on session init, before every
+  Start, and via the Settings button. Prevents Streamlit Cloud
+  RAM-limit kills caused by zombie Chrome processes.
+- `WINDOWS_SETUP.md` + `run_windows.bat` local launcher.
+- `selenium-stealth==1.0.6` dependency.
+
+### Changed
+- **Sidebar removed** — admin/diagnostic tools moved to the Settings
+  route. The Cota topbar is the only navigation now.
+- `undetected-chromedriver==3.5.5` (was `>=3.5.5`).
+- `openpyxl>=3.1.5` (was `==3.1.2`) to satisfy modern pandas.
+- UC kwargs branched by host: Linux uses system chromedriver
+  (copied to `/tmp/chromedriver_<uuid>` for UC patching) +
+  `use_subprocess=True`; macOS/Windows uses `use_subprocess=False`
+  to avoid the headless-window-dies-on-first-navigation issue with
+  Chrome 147+ on Mac.
+- `version_main=chrome_version` is set on every host so UC doesn't
+  auto-download a chromedriver one major ahead of installed Chrome
+  (e.g. 148 vs 147).
+
+### Removed
+- `--disable-features=VizDisplayCompositor,TranslateUI` Chrome flag
+  — known to crash Chromium 120+ in containers.
+- `--js-flags=--max-old-space-size=256` — too restrictive, made
+  Chrome refuse to start on JS-heavy sites.
+- `streamlit_utils.py`, `parse_bot_client.py`, `parse_bot_scraper.py`
+  — orphaned modules with no callers.
+- One-off historical docs (BUGFIX_V1.0.1, RACE_CONDITION_FIX,
+  FINAL_STATUS, CLEANUP_*, ANTI_SPAM_*, STEALTH_MODE,
+  LOGGING_GUIDE, LOGIN_SETUP, LEIA-ME, COMO_TESTAR,
+  CONCLUSAO_TESTES_PARALELOS, SUMARIO_EXECUTIVO,
+  DOCUMENTATION_INDEX) moved to `docs/archive/`.
+- Test scripts (`test_*.py`) moved to `archive/test_files/`.
+
+### Fixed
+- "Failed to initialize web driver" error message now surfaces the
+  actual exception type, message, and traceback (previously hidden
+  in logs).
+- Chromedriver verbose log captured on plain-Selenium fallback so
+  Chrome crash reasons are visible in the UI.
+- "Text file busy: /tmp/chromedriver" — each session uses a unique
+  `/tmp/chromedriver_<uuid>` path.
+- `KeyError: 'stealth_scraper'` on Streamlit Cloud — UC import is
+  now lazy inside `setup_driver()`, so a UC import failure on
+  Python 3.13 no longer brings down the whole module.
+- Headless-mode + Chrome 147 on macOS killing the window on first
+  navigation (recovery loop, ~3× slowdown).
+
 ## [1.0.5] - 2026-01-28
 
 ### Fixed
