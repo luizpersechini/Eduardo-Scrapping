@@ -26,6 +26,13 @@ import config
 LOG_DIR = Path("session_logs")
 LOG_DIR.mkdir(exist_ok=True)
 
+# Persisted scrape outputs — every completed (or interrupted) run writes its
+# Excel here so it can be re-downloaded later from the History page.
+# `_partial.xlsx` suffix marks runs that were interrupted before finishing
+# all CNPJs.
+RESULTS_DIR = Path("results")
+RESULTS_DIR.mkdir(exist_ok=True)
+
 def setup_session_logger():
     """Setup a session-specific logger that writes to file"""
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -373,89 +380,155 @@ if st.session_state.route == "history":
     st.markdown(
         cota_theme.page_head(
             title="History",
-            sub="Past scraping runs — re-download the session log for any of them.",
+            sub="Re-download the Excel from any past scrape — including runs that were stopped mid-way.",
         ),
         unsafe_allow_html=True,
     )
 
-    log_dir = Path("session_logs")
-    log_files = sorted(
-        log_dir.glob("scraping_session_*.log"),
+    # Each row in the table is a saved Excel file in `results/`. Excels are
+    # the primary artefact users come back for; the corresponding session
+    # log is offered as a secondary download when one can be found.
+    excel_files = sorted(
+        RESULTS_DIR.glob("anbima_results_*.xlsx"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
-    ) if log_dir.exists() else []
+    ) if RESULTS_DIR.exists() else []
 
+    log_files = sorted(
+        LOG_DIR.glob("scraping_session_*.log"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    ) if LOG_DIR.exists() else []
+
+    def _parse_excel_filename(name: str) -> tuple[str, bool]:
+        """Return (timestamp_str, was_partial) from anbima_results_*.xlsx names."""
+        stem = name.removeprefix("anbima_results_").removesuffix(".xlsx")
+        partial = stem.endswith("_partial")
+        if partial:
+            stem = stem[:-len("_partial")]
+        return stem, partial
+
+    def _friendly_ts(stem: str) -> str:
+        m = re.match(r"(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})", stem)
+        if m:
+            yyyy, mm, dd, hh, mi, _ss = m.groups()
+            return f"{yyyy}-{mm}-{dd} {hh}:{mi}"
+        return stem
+
+    def _matching_log(stem: str) -> Path | None:
+        """Find the closest session log written before/at the same time as this Excel."""
+        if not log_files:
+            return None
+        m = re.match(r"(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})", stem)
+        if not m:
+            return None
+        try:
+            excel_dt = datetime.strptime(stem, "%Y%m%d_%H%M%S")
+        except Exception:
+            return None
+        # Pick the log whose timestamp is the largest one <= excel_dt
+        best = None
+        best_dt = None
+        for lp in log_files:
+            lm = re.match(r"scraping_session_(\d{8}_\d{6})", lp.stem)
+            if not lm:
+                continue
+            try:
+                ldt = datetime.strptime(lm.group(1), "%Y%m%d_%H%M%S")
+            except Exception:
+                continue
+            if ldt <= excel_dt and (best_dt is None or ldt > best_dt):
+                best, best_dt = lp, ldt
+        return best
+
+    # ── Card 1: saved Excels ────────────────────────────────────────────
     with st.container(border=True):
         st.markdown(
-            '<h2 class="cota-card-title">Scrape history</h2>'
-            f'<p class="cota-card-sub">{len(log_files)} session log file(s) on disk.</p>',
+            '<h2 class="cota-card-title">Saved scrape outputs</h2>'
+            f'<p class="cota-card-sub">{len(excel_files)} Excel file(s) on disk under <code>results/</code>.</p>',
             unsafe_allow_html=True,
         )
 
-        if not log_files:
+        if not excel_files:
             st.markdown(
-                '<div class="cota-empty">No runs yet — start a scrape to see it here.</div>',
+                '<div class="cota-empty">No outputs yet — start a scrape and finish (or stop) it to see one here.</div>',
                 unsafe_allow_html=True,
             )
         else:
-            for log_path in log_files[:50]:  # cap at 50 most recent for the page
-                # Parse stats from log content
-                run_id = log_path.stem.replace("scraping_session_", "")
-                size_kb = log_path.stat().st_size / 1024
-                try:
-                    text = log_path.read_text(encoding='utf-8', errors='replace')
-                except Exception:
-                    text = ""
+            # Header
+            st.markdown(
+                '<div class="cota-result-row cota-result-head" style="grid-template-columns:170px 1fr 110px 110px 100px;">'
+                '<span>Run</span>'
+                '<span>Status</span>'
+                '<span style="text-align:right;">Size</span>'
+                '<span style="text-align:right;">Excel</span>'
+                '<span style="text-align:right;">Log</span>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
 
-                def _grep_int(pattern: str) -> int | None:
-                    m = re.search(pattern, text)
-                    return int(m.group(1)) if m else None
+            for xpath in excel_files[:200]:
+                stem, partial = _parse_excel_filename(xpath.name)
+                friendly = _friendly_ts(stem)
+                size_kb = xpath.stat().st_size / 1024
+                log_path = _matching_log(stem)
 
-                def _grep_float(pattern: str) -> float | None:
-                    m = re.search(pattern, text)
-                    return float(m.group(1)) if m else None
+                tag = (
+                    '<span class="cota-tag cota-tag-warn">⚠ Partial</span>'
+                    if partial else
+                    '<span class="cota-tag cota-tag-ok">✓ Complete</span>'
+                )
 
-                total = _grep_int(r"Total CNPJs(?: requested)?:\s*(\d+)")
-                successful = _grep_int(r"Successful:\s*(\d+)")
-                duration = _grep_float(r"Total Time:\s*([\d.]+)\s*minutes")
-
-                # Friendly date from filename (YYYYMMDD_HHMMSS)
-                friendly = run_id
-                m = re.match(r"(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})", run_id)
-                if m:
-                    yyyy, mm, dd, hh, mi, _ss = m.groups()
-                    friendly = f"{yyyy}-{mm}-{dd} {hh}:{mi}"
-
-                meta_bits = [friendly]
-                if total is not None:
-                    meta_bits.append(f"{total} CNPJs")
-                if duration is not None:
-                    meta_bits.append(f"{duration:.1f} min")
-                meta_bits.append(f"{size_kb:.1f} KB")
-                meta_str = " · ".join(meta_bits)
-
-                pct = (successful / total * 100) if (successful is not None and total) else None
-
-                # Render row HTML + place download button beside it
-                row_l, row_r = st.columns([5, 1])
-                with row_l:
+                # 5-column row: Run / Status / Size / Excel button / Log button
+                c_run, c_status, c_size, c_excel, c_log = st.columns([170, 800, 110, 110, 100])
+                with c_run:
                     st.markdown(
-                        cota_theme.history_row(run_id=run_id, meta=meta_str, success_pct=pct),
+                        f'<div style="font-family:Geist Mono,monospace;font-size:12.5px;padding-top:8px;">{stem}</div>'
+                        f'<div class="cota-history-meta">{friendly}</div>',
                         unsafe_allow_html=True,
                     )
-                with row_r:
-                    try:
-                        log_bytes = log_path.read_bytes()
-                    except Exception:
-                        log_bytes = b""
-                    st.download_button(
-                        "📋 Log",
-                        data=log_bytes,
-                        file_name=log_path.name,
-                        mime="text/plain",
-                        width='stretch',
-                        key=f"hist_dl_{run_id}",
+                with c_status:
+                    st.markdown(
+                        f'<div style="padding-top:10px;">{tag}</div>',
+                        unsafe_allow_html=True,
                     )
+                with c_size:
+                    st.markdown(
+                        f'<div style="text-align:right;font-family:Geist Mono,monospace;font-size:12.5px;padding-top:10px;color:var(--fg-mute);">{size_kb:.1f} KB</div>',
+                        unsafe_allow_html=True,
+                    )
+                with c_excel:
+                    try:
+                        xbytes = xpath.read_bytes()
+                    except Exception:
+                        xbytes = b""
+                    st.download_button(
+                        "⬇ Excel",
+                        data=xbytes,
+                        file_name=xpath.name,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        width='stretch',
+                        key=f"hist_xlsx_{xpath.name}",
+                    )
+                with c_log:
+                    if log_path:
+                        try:
+                            lbytes = log_path.read_bytes()
+                        except Exception:
+                            lbytes = b""
+                        st.download_button(
+                            "📋 Log",
+                            data=lbytes,
+                            file_name=log_path.name,
+                            mime="text/plain",
+                            width='stretch',
+                            key=f"hist_log_{xpath.name}",
+                        )
+                    else:
+                        st.markdown(
+                            '<div style="text-align:right;color:var(--fg-mute);font-size:11.5px;padding-top:10px;">—</div>',
+                            unsafe_allow_html=True,
+                        )
 
     st.markdown(cota_theme.footer(version=f"v{APP_VERSION}", build=f"build {GIT_COMMIT}"), unsafe_allow_html=True)
     st.stop()
@@ -971,6 +1044,22 @@ if st.session_state.phase == "scrape":
                 output_df = processor.process_scraped_data(results)
                 st.session_state.results = output_df
                 st.session_state.session_logger.info(f"Results processed successfully - {len(output_df)} rows")
+
+                # Persist the Excel to disk so it's recoverable from the
+                # History page later. Use the scrape's start time as the
+                # timestamp so the file pairs cleanly with its session log
+                # by date. Append "_partial" if the run didn't finish.
+                try:
+                    scrape_ts = datetime.fromtimestamp(
+                        st.session_state.start_time or time.time()
+                    ).strftime("%Y%m%d_%H%M%S")
+                    suffix = "_partial" if (was_interrupted or st.session_state.stop_scraping) else ""
+                    excel_path = RESULTS_DIR / f"anbima_results_{scrape_ts}{suffix}.xlsx"
+                    output_df.to_excel(excel_path, index=False)
+                    st.session_state.last_excel_path = str(excel_path)
+                    st.session_state.session_logger.info(f"Excel saved to {excel_path}")
+                except Exception as e:
+                    st.session_state.session_logger.warning(f"Could not persist Excel to disk: {e}")
             except Exception as e:
                 status_slot.warning(f"⚠️ Warning: Could not process all results - {str(e)}")
                 st.session_state.session_logger.error(f"Error processing results: {str(e)}")

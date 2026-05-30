@@ -60,3 +60,11 @@ EDUARDO_CREDENTIALS.txt
 # Local tooling output (per-user, not shared)
 .claude/
 graphify-out/
+
+# Persisted scrape outputs — written by the History feature; per-user data,
+# not shared (CNPJs and fund data may be sensitive).
+results/
+
+# Generated graphify artifacts (root copies)
+architecture.html
+architecture.json
