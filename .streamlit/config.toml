@@ -8,7 +8,7 @@ textColor = "#262524"               # near-black fg    (oklch(0.22 0.01 60))
 font = "sans serif"
 
 [server]
-port = 8501
+# port omitted — defaults to 8501, override with `--server.port=NNNN`.
 enableCORS = true
 enableXsrfProtection = false
 maxUploadSize = 10
@@ -16,8 +16,10 @@ headless = true
 
 [browser]
 gatherUsageStats = false
-serverAddress = "localhost"
-serverPort = 8501
+# serverAddress / serverPort intentionally omitted so Streamlit derives the
+# displayed URL from whatever port [server].port (or `--server.port`) resolves
+# to. With them hardcoded, the "You can now view your Streamlit app" message
+# was misleading when running on any port other than 8501.
 
 [runner]
 magicEnabled = true

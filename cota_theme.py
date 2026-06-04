@@ -148,6 +148,55 @@ html, body, [data-testid="stAppViewContainer"], .stApp {
   border-color: oklch(0.16 0.01 60) !important;
 }
 
+/* ─────────────────────────────────────────────────────
+   Nav tabs — the route-switcher button row reads as a tab bar.
+   Streamlit adds an `st-key-<key>` class to each widget container, so we
+   scope these styles to the four nav buttons only (logout stays a button).
+   Active route = type="primary" (emerald underline); inactive = muted text.
+   ───────────────────────────────────────────────────── */
+.st-key-nav_scrape, .st-key-nav_fidc,
+.st-key-nav_history, .st-key-nav_settings { margin-top: -4px; }
+
+.st-key-nav_scrape button, .st-key-nav_fidc button,
+.st-key-nav_history button, .st-key-nav_settings button {
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  color: var(--fg-2) !important;
+  font-weight: 500 !important;
+  height: 34px !important;
+  padding: 0 4px !important;
+  box-shadow: none !important;
+  transition: color .15s, border-color .15s !important;
+}
+.st-key-nav_scrape button:hover, .st-key-nav_fidc button:hover,
+.st-key-nav_history button:hover, .st-key-nav_settings button:hover {
+  color: var(--fg) !important;
+  background: transparent !important;
+  border-bottom-color: var(--line) !important;
+}
+/* Active route — Streamlit renders it as a primary button. Override the dark
+   pill look with an emerald-underlined tab. */
+.st-key-nav_scrape [data-testid="stBaseButton-primary"],
+.st-key-nav_fidc [data-testid="stBaseButton-primary"],
+.st-key-nav_history [data-testid="stBaseButton-primary"],
+.st-key-nav_settings [data-testid="stBaseButton-primary"] {
+  background: transparent !important;
+  color: var(--fg) !important;
+  font-weight: 600 !important;
+  border: 0 !important;
+  border-bottom: 2px solid var(--accent) !important;
+  border-radius: 0 !important;
+}
+.st-key-nav_scrape [data-testid="stBaseButton-primary"]:hover,
+.st-key-nav_fidc [data-testid="stBaseButton-primary"]:hover,
+.st-key-nav_history [data-testid="stBaseButton-primary"]:hover,
+.st-key-nav_settings [data-testid="stBaseButton-primary"]:hover {
+  background: transparent !important;
+  border-bottom-color: var(--accent) !important;
+}
+
 /* Inputs — text + password */
 .stTextInput input, .stTextArea textarea, .stNumberInput input, .stDateInput input {
   background: var(--bg-elev) !important;
@@ -740,14 +789,20 @@ button[aria-label="Close sidebar"] { display: none !important; }
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def inject_css() -> None:
     """Inject Cota's CSS + Geist font links. Call this once near the top of
     `streamlit_app.py`, after `st.set_page_config(...)`."""
     import streamlit as st
+
     st.markdown(COTA_CSS, unsafe_allow_html=True)
 
 
-def brand_mark(size: str = "lg", with_text: bool = True, tagline: str | None = "ANBIMA fund data, on demand") -> str:
+def brand_mark(
+    size: str = "lg",
+    with_text: bool = True,
+    tagline: str | None = "ANBIMA fund data, on demand",
+) -> str:
     """Return HTML for the Cota brand mark (dark square with glowing emerald dot).
 
     `size` ∈ {"lg", "sm"}. `with_text` adds "Cota" beside the mark.
@@ -761,25 +816,34 @@ def brand_mark(size: str = "lg", with_text: bool = True, tagline: str | None = "
     name_sm = " sm" if size == "sm" else ""
     text = ""
     if with_text:
-        tagline_html = f'<div class="cota-brand-tagline">{tagline}</div>' if tagline and size == "lg" else ""
+        tagline_html = (
+            f'<div class="cota-brand-tagline">{tagline}</div>'
+            if tagline and size == "lg"
+            else ""
+        )
         text = (
             f'<div class="cota-brand-text">'
             f'<div class="cota-brand-name{name_sm}">Cota</div>'
-            f'{tagline_html}'
-            f'</div>'
+            f"{tagline_html}"
+            f"</div>"
         )
     return (
         f'<div class="cota-brand-row">'
         f'<div class="cota-mark{sm}" aria-hidden="true">'
         f'<span class="dot"></span><span class="bar"></span>'
-        f'</div>'
-        f'{text}'
-        f'</div>'
+        f"</div>"
+        f"{text}"
+        f"</div>"
     )
 
 
 def topbar(user: str, route: str, status_text: str = "Scraper online") -> str:
-    """Render Cota's sticky topbar.
+    """Render Cota's sticky topbar: brand + status pill + user.
+
+    Navigation is NOT in the topbar — it lives in the real Streamlit button
+    row rendered just below it (st.button can't be embedded in injected HTML).
+    Earlier the topbar showed inert <span> "tabs" that looked clickable but did
+    nothing, which is confusing, so they were removed: one nav, no decoys.
 
     HTML is emitted as a single line (no leading whitespace) so Streamlit's
     markdown parser doesn't mistake indented lines for code blocks.
@@ -787,27 +851,11 @@ def topbar(user: str, route: str, status_text: str = "Scraper online") -> str:
     avatar = (user[:1] or "?").upper()
     user_safe = user.replace("<", "&lt;").replace(">", "&gt;")
 
-    def _link(name: str, label: str) -> str:
-        active = " active" if route == name else ""
-        active_style = "color:var(--fg);background:var(--bg-sunk);" if active else ""
-        return (
-            f'<span class="cota-navlink{active}" '
-            f'style="border:0;background:transparent;color:var(--fg-2);'
-            f'font-size:13px;font-weight:500;padding:6px 12px;border-radius:6px;'
-            f'{active_style}">{label}</span>'
-        )
-
     return (
         '<div class="cota-topbar">'
         '<div class="cota-topbar-left">'
-        f'{brand_mark(size="sm", with_text=True, tagline=None)}'
-        '<span class="cota-topbar-divider"></span>'
-        '<nav class="cota-topbar-nav">'
-        f'{_link("scrape", "New scrape")}'
-        f'{_link("history", "History")}'
-        f'{_link("settings", "Settings")}'
-        '</nav>'
-        '</div>'
+        f"{brand_mark(size='sm', with_text=True, tagline=None)}"
+        "</div>"
         '<div class="cota-topbar-right">'
         f'<span class="cota-status-pill"><span class="cota-status-dot"></span> {status_text}</span>'
         '<span class="cota-usermenu">'
@@ -815,7 +863,7 @@ def topbar(user: str, route: str, status_text: str = "Scraper online") -> str:
         '<span class="cota-usermenu-text">'
         f'<span class="cota-usermenu-name">{user_safe}</span>'
         '<span class="cota-usermenu-role">Workspace admin</span>'
-        '</span></span></div></div>'
+        "</span></span></div></div>"
     )
 
 
@@ -825,17 +873,17 @@ def page_head(title: str, sub: str, right_html: str = "") -> str:
         '<div class="cota-page-head">'
         f'<div><h1 class="cota-page-title">{title}</h1>'
         f'<p class="cota-page-sub">{sub}</p></div>'
-        f'<div>{right_html}</div>'
-        '</div>'
+        f"<div>{right_html}</div>"
+        "</div>"
     )
 
 
 def footer(version: str = "v2.4.0", build: str = "build a91c3f") -> str:
     return (
         '<div class="cota-footer">'
-        '<span>Cota · ANBIMA fund data scraper</span>'
+        "<span>Cota · ANBIMA fund data scraper</span>"
         f'<span class="cota-muted">{version} · {build}</span>'
-        '</div>'
+        "</div>"
     )
 
 
@@ -845,7 +893,7 @@ def login_bg() -> str:
         '<div class="cota-login-bg" aria-hidden="true">'
         '<div class="cota-login-bg-grid"></div>'
         '<div class="cota-login-bg-glow"></div>'
-        '</div>'
+        "</div>"
     )
 
 
@@ -854,10 +902,10 @@ def login_bg() -> str:
 # ---------------------------------------------------------------------------
 
 _STEP_DEFS = [
-    ("upload", "Upload",   "CNPJ list"),
-    ("review", "Review",   "Verify & configure"),
-    ("scrape", "Scrape",   "Fetch fund data"),
-    ("done",   "Download", "Export results"),
+    ("upload", "Upload", "CNPJ list"),
+    ("review", "Review", "Verify & configure"),
+    ("scrape", "Scrape", "Fetch fund data"),
+    ("done", "Download", "Export results"),
 ]
 _STEP_ORDER = {k: i for i, (k, _, _) in enumerate(_STEP_DEFS)}
 
@@ -886,16 +934,19 @@ def stepper(phase: str) -> str:
             '<div class="cota-step-text">'
             f'<div class="cota-step-label">{label}</div>'
             f'<div class="cota-step-help">{help_text}</div>'
-            '</div>'
-            f'{line}'
-            '</li>'
+            "</div>"
+            f"{line}"
+            "</li>"
         )
-    return f'<ol class="cota-stepper" aria-label="Workflow progress">{"".join(items)}</ol>'
+    return (
+        f'<ol class="cota-stepper" aria-label="Workflow progress">{"".join(items)}</ol>'
+    )
 
 
 # ---------------------------------------------------------------------------
 # CNPJ table
 # ---------------------------------------------------------------------------
+
 
 def cnpj_table(cnpjs: list, query: str = "", names: list | None = None) -> str:
     """Render a Cota-styled, searchable table of CNPJs.
@@ -919,7 +970,7 @@ def cnpj_table(cnpjs: list, query: str = "", names: list | None = None) -> str:
             f'<span class="cota-col-cnpj">{c_str}</span>'
             f'<span class="cota-col-name">{name_safe}</span>'
             '<span class="cota-col-status"><span class="cota-tag cota-tag-ready">Ready</span></span>'
-            '</div>'
+            "</div>"
         )
 
     body = (
@@ -936,16 +987,17 @@ def cnpj_table(cnpjs: list, query: str = "", names: list | None = None) -> str:
         '<span class="cota-col-cnpj">CNPJ</span>'
         '<span class="cota-col-name">Estimated fund</span>'
         '<span class="cota-col-status">Status</span>'
-        '</div>'
+        "</div>"
         f'<div class="cota-cnpj-body">{body}</div>'
-        '</div>'
-        f'{meta}'
+        "</div>"
+        f"{meta}"
     )
 
 
 # ---------------------------------------------------------------------------
 # Run summary (Review right column)
 # ---------------------------------------------------------------------------
+
 
 def run_summary(rows: list[tuple[str, str]]) -> str:
     """Render a small key/value summary block. Each row is (label, value)."""
@@ -964,13 +1016,14 @@ def setting_text(label: str, help_text: str) -> str:
         '<div class="cota-setting-text">'
         f'<div class="cota-setting-label">{label}</div>'
         f'<div class="cota-setting-help">{help_text}</div>'
-        '</div>'
+        "</div>"
     )
 
 
 # ---------------------------------------------------------------------------
 # Scrape progress helpers
 # ---------------------------------------------------------------------------
+
 
 def progress_hero(
     pct: float,
@@ -986,13 +1039,16 @@ def progress_hero(
     `pct` is 0.0 – 1.0. All other values are pre-formatted by the caller.
     """
     import math
+
     r = 56
     c = 2 * math.pi * r
     offset = c * (1 - max(0.0, min(1.0, pct)))
     pct_pct = int(round(pct * 100))
 
     remaining_str = f"{remaining_min:.1f} min" if remaining_min is not None else "—"
-    throughput_str = f"{throughput_per_min:.1f} /min" if throughput_per_min is not None else "—"
+    throughput_str = (
+        f"{throughput_per_min:.1f} /min" if throughput_per_min is not None else "—"
+    )
 
     ring = (
         '<div class="cota-ring-wrap">'
@@ -1003,7 +1059,7 @@ def progress_hero(
         f'transform="rotate(-90 70 70)"/>'
         f'<text x="70" y="68" text-anchor="middle" class="cota-ring-pct">{pct_pct}%</text>'
         '<text x="70" y="86" text-anchor="middle" class="cota-ring-lab">complete</text>'
-        '</svg></div>'
+        "</svg></div>"
     )
 
     def stat(label: str, value: str, kind: str = "") -> str:
@@ -1012,20 +1068,20 @@ def progress_hero(
             f'<div class="{cls}">'
             f'<div class="cota-stat-label">{label}</div>'
             f'<div class="cota-stat-value">{value}</div>'
-            '</div>'
+            "</div>"
         )
 
     failed_kind = "err" if failed > 0 else ""
 
     stats = (
         '<div class="cota-progress-stats">'
-        f'{stat("Processed", processed, "accent")}'
-        f'{stat("Success", str(success), "ok")}'
-        f'{stat("Failed", str(failed), failed_kind)}'
-        f'{stat("Elapsed", f"{elapsed_min:.1f} min")}'
-        f'{stat("Remaining", remaining_str)}'
-        f'{stat("Throughput", throughput_str)}'
-        '</div>'
+        f"{stat('Processed', processed, 'accent')}"
+        f"{stat('Success', str(success), 'ok')}"
+        f"{stat('Failed', str(failed), failed_kind)}"
+        f"{stat('Elapsed', f'{elapsed_min:.1f} min')}"
+        f"{stat('Remaining', remaining_str)}"
+        f"{stat('Throughput', throughput_str)}"
+        "</div>"
     )
 
     return f'<div class="cota-progress-hero">{ring}{stats}</div>'
@@ -1036,12 +1092,14 @@ def progress_bar_html(pct: float) -> str:
     pct = max(0.0, min(1.0, pct))
     return (
         '<div class="cota-progress-bar-track">'
-        f'<div class="cota-progress-bar-fill" style="width:{pct*100:.1f}%"></div>'
-        '</div>'
+        f'<div class="cota-progress-bar-fill" style="width:{pct * 100:.1f}%"></div>'
+        "</div>"
     )
 
 
-def activity_panel(events: list[dict], current_event: dict | None = None, limit: int = 8) -> str:
+def activity_panel(
+    events: list[dict], current_event: dict | None = None, limit: int = 8
+) -> str:
     """Live activity feed.
 
     `events` is a list of dicts with keys: cnpj, name, status ("success"|"failed"),
@@ -1056,21 +1114,21 @@ def activity_panel(events: list[dict], current_event: dict | None = None, limit:
         rows.append(
             '<div class="cota-activity-row pending">'
             '<span class="cota-act-dot pending"></span>'
-            f'<span class="cota-act-cnpj">{current_event.get("cnpj","")}</span>'
+            f'<span class="cota-act-cnpj">{current_event.get("cnpj", "")}</span>'
             f'<span class="cota-act-name cota-shimmer">Fetching…</span>'
             '<span class="cota-act-points">—</span>'
             '<span class="cota-act-ms">…</span>'
-            '</div>'
+            "</div>"
         )
     for ev in list(events)[-limit:][::-1]:
         status = ev.get("status", "success")
         cnpj = str(ev.get("cnpj", ""))
         name = str(ev.get("name", "")).replace("<", "&lt;").replace(">", "&gt;")
         if status == "success":
-            points = f'{int(ev.get("points", 0))} points'
+            points = f"{int(ev.get('points', 0))} points"
         else:
             points = "no data"
-        ms = f'{int(ev.get("ms", 0))}ms'
+        ms = f"{int(ev.get('ms', 0))}ms"
         rows.append(
             f'<div class="cota-activity-row {status}">'
             f'<span class="cota-act-dot {status}"></span>'
@@ -1078,7 +1136,7 @@ def activity_panel(events: list[dict], current_event: dict | None = None, limit:
             f'<span class="cota-act-name">{name}</span>'
             f'<span class="cota-act-points">{points}</span>'
             f'<span class="cota-act-ms">{ms}</span>'
-            '</div>'
+            "</div>"
         )
     if not rows:
         body = '<div class="cota-empty">Warming up the driver…</div>'
@@ -1090,15 +1148,16 @@ def activity_panel(events: list[dict], current_event: dict | None = None, limit:
         '<div class="cota-activity-head">'
         '<span class="cota-activity-title">Live activity</span>'
         f'<span class="cota-activity-meta">last {limit} events</span>'
-        '</div>'
+        "</div>"
         f'<div class="cota-activity-list">{body}</div>'
-        '</div>'
+        "</div>"
     )
 
 
 # ---------------------------------------------------------------------------
 # Results page helpers
 # ---------------------------------------------------------------------------
+
 
 def success_circle(variant: str = "ok") -> str:
     """Large emerald-tinted circle with a check icon (or amber + ! if interrupted).
@@ -1116,9 +1175,9 @@ def success_circle(variant: str = "ok") -> str:
         f'<div class="{cls}">'
         '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" '
         'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
-        f'{icon_path}'
-        '</svg>'
-        '</div>'
+        f"{icon_path}"
+        "</svg>"
+        "</div>"
     )
 
 
@@ -1140,7 +1199,7 @@ def kpi_row(items: list[tuple]) -> str:
             f'<div class="{cls}">'
             f'<div class="cota-kpi-label">{label}</div>'
             f'<div class="cota-kpi-value">{value}</div>'
-            '</div>'
+            "</div>"
         )
     return f'<div class="cota-kpi-row">{"".join(tiles)}</div>'
 
@@ -1163,12 +1222,12 @@ def result_table(events: list[dict], filter_by: str = "All") -> str:
         name = str(e.get("name", "")).replace("<", "&lt;").replace(">", "&gt;")
         status = e.get("status", "success")
         if status == "success":
-            points = f'{int(e.get("points", 0)):,}'
+            points = f"{int(e.get('points', 0)):,}"
             tag = '<span class="cota-tag cota-tag-ok">✓ Success</span>'
         else:
             points = "—"
             tag = '<span class="cota-tag cota-tag-err">✗ Failed</span>'
-        ms = f'{int(e.get("ms", 0))} ms'
+        ms = f"{int(e.get('ms', 0))} ms"
         rows.append(
             '<div class="cota-result-row">'
             f'<span class="cota-rcol-cnpj">{cnpj}</span>'
@@ -1176,7 +1235,7 @@ def result_table(events: list[dict], filter_by: str = "All") -> str:
             f'<span class="cota-rcol-points">{points}</span>'
             f'<span class="cota-rcol-time">{ms}</span>'
             f'<span class="cota-rcol-status">{tag}</span>'
-            '</div>'
+            "</div>"
         )
     body = "".join(rows) or '<div class="cota-empty">No results to show.</div>'
     return (
@@ -1187,9 +1246,9 @@ def result_table(events: list[dict], filter_by: str = "All") -> str:
         '<span class="cota-rcol-points">Data points</span>'
         '<span class="cota-rcol-time">Time</span>'
         '<span class="cota-rcol-status">Status</span>'
-        '</div>'
+        "</div>"
         f'<div class="cota-result-body">{body}</div>'
-        '</div>'
+        "</div>"
     )
 
 
@@ -1204,7 +1263,7 @@ _HISTORY_ICON_SVG = (
     '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/>'
     '<path d="M3 3v5h5"/>'
     '<path d="M12 7v5l3 2"/>'
-    '</svg>'
+    "</svg>"
 )
 
 
@@ -1222,13 +1281,13 @@ def history_row(run_id: str, meta: str, success_pct: float | None) -> str:
     return (
         '<div class="cota-history-row">'
         f'<div class="cota-history-icon">{_HISTORY_ICON_SVG}</div>'
-        '<div>'
+        "<div>"
         f'<div class="cota-history-title">{run_id}</div>'
         f'<div class="cota-history-meta">{meta}</div>'
-        '</div>'
-        f'<div>{tag}</div>'
-        '<div></div>'  # spacer; caller places the download_button below or beside
-        '</div>'
+        "</div>"
+        f"<div>{tag}</div>"
+        "<div></div>"  # spacer; caller places the download_button below or beside
+        "</div>"
     )
 
 
@@ -1237,5 +1296,5 @@ def env_row(label: str, value: str) -> str:
         '<div class="cota-env-row">'
         f'<span class="cota-env-label">{label}</span>'
         f'<span class="cota-env-value">{value}</span>'
-        '</div>'
+        "</div>"
     )
