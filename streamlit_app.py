@@ -18,7 +18,7 @@ import traceback
 import sys
 
 # Import existing scrapers
-from stealth_scraper import StealthANBIMAScraper
+from stealth_scraper import StealthANBIMAScraper, subclass_matches
 from data_processor import DataProcessor
 import config
 
@@ -254,6 +254,10 @@ if "fidc_stop" not in st.session_state:
     st.session_state.fidc_stop = False
 if "fidc_last_excel_path" not in st.session_state:
     st.session_state.fidc_last_excel_path = None
+# {normalized_cnpj: desired_subclass_label} — when set, keep only the matching
+# subclass per CNPJ (from an optional "Subclasse desejada" column on upload).
+if "fidc_desired" not in st.session_state:
+    st.session_state.fidc_desired = {}
 
 
 def kill_orphan_chrome():
@@ -853,9 +857,44 @@ if st.session_state.route == "fidc":
                     if "CNPJ" in df.columns:
                         st.session_state.fidc_cnpjs = df["CNPJ"].astype(str).tolist()
                         st.session_state.fidc_uploaded_filename = fidc_uploaded.name
+
+                        # Optional: a column naming the desired subclass per CNPJ.
+                        # When present, the scraper keeps ONLY the matching
+                        # subclass for each CNPJ (graceful fallback to all if a
+                        # label doesn't match anything). Accepts a few header
+                        # spellings.
+                        import re as _re
+
+                        def _norm_cnpj(x):
+                            return _re.sub(r"\s+", "", str(x))
+
+                        desired_col = next(
+                            (
+                                c
+                                for c in df.columns
+                                if str(c).strip().lower()
+                                in (
+                                    "subclasse desejada",
+                                    "subclasse",
+                                    "subclass",
+                                    "desired subclass",
+                                    "subclasse_desejada",
+                                )
+                            ),
+                            None,
+                        )
+                        fidc_desired = {}
+                        if desired_col is not None:
+                            for _, row in df.iterrows():
+                                val = str(row[desired_col]).strip()
+                                if val and val.lower() != "nan":
+                                    fidc_desired[_norm_cnpj(row["CNPJ"])] = val
+                        st.session_state.fidc_desired = fidc_desired
+
                         st.session_state.session_logger.info(
                             f"[FIDC] File uploaded: {fidc_uploaded.name} "
-                            f"({len(st.session_state.fidc_cnpjs)} CNPJs)"
+                            f"({len(st.session_state.fidc_cnpjs)} CNPJs, "
+                            f"{len(fidc_desired)} with a desired-subclass filter)"
                         )
                         st.session_state.fidc_phase = "review"
                         st.rerun()
@@ -950,6 +989,7 @@ if st.session_state.route == "fidc":
                     label_visibility="collapsed",
                 )
 
+                _n_desired = len(st.session_state.get("fidc_desired", {}))
                 st.markdown(
                     cota_theme.run_summary(
                         [
@@ -960,7 +1000,12 @@ if st.session_state.route == "fidc":
                                 if st.session_state.settings["stealth"]
                                 else "Standard",
                             ),
-                            ("Note", "1 CNPJ → N subclasses"),
+                            (
+                                "Subclass filter",
+                                f"{_n_desired} CNPJ(s) → keep only chosen"
+                                if _n_desired
+                                else "off — all subclasses",
+                            ),
                         ]
                     ),
                     unsafe_allow_html=True,
@@ -1131,6 +1176,33 @@ if st.session_state.route == "fidc":
                 )
                 try:
                     result = scraper.scrape_fidc_data(cnpj)
+
+                    # Optional per-CNPJ subclass filter: keep only the subclass
+                    # the user asked for. If the label matches nothing, keep all
+                    # (so data isn't lost) and note it.
+                    import re as _re
+
+                    desired = st.session_state.fidc_desired.get(
+                        _re.sub(r"\s+", "", str(cnpj))
+                    )
+                    if desired and result.get("subclasses"):
+                        kept = [
+                            s
+                            for s in result["subclasses"]
+                            if subclass_matches(desired, s)
+                        ]
+                        if kept:
+                            result["subclasses"] = kept
+                            st.session_state.session_logger.info(
+                                f"[FIDC {idx}/{total}] filtered to '{desired}': "
+                                f"{len(kept)} subclass(es)"
+                            )
+                        else:
+                            st.session_state.session_logger.warning(
+                                f"[FIDC {idx}/{total}] desired '{desired}' matched no "
+                                f"subclass — keeping all {len(result['subclasses'])}"
+                            )
+
                     results.append(result)
                     ms = int((time.time() - t0) * 1000)
                     subs = result.get("subclasses", []) or []

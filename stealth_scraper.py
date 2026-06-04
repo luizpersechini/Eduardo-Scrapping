@@ -63,6 +63,52 @@ from selenium.common.exceptions import (
 import config
 
 
+def subclass_matches(desired: str, sub: dict) -> bool:
+    """True if a scraped FIDC subclass dict matches the user's desired label/code.
+
+    Robust to the several ways a user might name what they want:
+      - by subclass code:  "S0000762296" → matched against the scraped code by
+        its digit run (handles S/0 prefixes, e.g. 50000762296 vs 0000762296)
+      - by class name:     "SUBCLASSE SENIOR" / "SUBCLASSE A" / "SUBCLASSE B"
+        → matched against the scraped subclass name
+    Empty/blank `desired` matches everything (no filter).
+    """
+    if not desired or not str(desired).strip():
+        return True
+    d_raw = str(desired).strip()
+    name = str(sub.get("subclasse_name", ""))
+    code = str(sub.get("subclasse_code", ""))
+
+    def alnum(s):
+        return re.sub(r"[^a-z0-9]", "", str(s).lower())
+
+    def digits(s):
+        return re.sub(r"\D", "", str(s))
+
+    # 1) code match by digit run (S0000762296 ↔ 50000762296 ↔ 0000762296)
+    dd, cc = digits(d_raw), digits(code)
+    if len(dd) >= 4 and cc and (dd in cc or cc in dd):
+        return True
+    # 2) alnum code match
+    d_an, c_an = alnum(d_raw), alnum(code)
+    if len(d_an) >= 4 and c_an and (d_an in c_an or c_an in d_an):
+        return True
+    # 3) whole desired phrase appears in the name ("SUBCLASSE SENIOR")
+    if d_an and d_an in alnum(name):
+        return True
+    # 4) class keyword match (accent-insensitive)
+    up_d = d_raw.upper()
+    up_n = name.upper().replace("Ú", "U").replace("Â", "A").replace("Ô", "O")
+    for key in ("SENIOR", "SUBORDINAD", "MEZANIN", "UNICA"):
+        if key in up_d.replace("Ú", "U") and key in up_n:
+            return True
+    # 5) "SUBCLASSE <X>" single-token (A/B/C/1/2) match
+    m = re.search(r"SUBCLASSE\s+([A-Z0-9]{1,3})\b", up_d)
+    if m and re.search(r"SUBCLASSE\s+" + re.escape(m.group(1)) + r"\b", up_n):
+        return True
+    return False
+
+
 class StealthANBIMAScraper:
     """Undetected ChromeDriver-based scraper for ANBIMA fund data"""
 
