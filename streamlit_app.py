@@ -231,7 +231,10 @@ if "settings" not in st.session_state:
         headless=_is_cloud_boot,  # False locally, True on cloud
         workers=1,
         delay=1.5,
+        proxy="",  # optional upstream proxy scheme://host:port (IP rotation)
     )
+# Back-compat: ensure 'proxy' exists if settings were created before this field.
+st.session_state.settings.setdefault("proxy", "")
 
 # ── FIDC workflow state (separate route, mirrors the regular-scrape keys) ──
 if "fidc_phase" not in st.session_state:
@@ -805,6 +808,25 @@ if st.session_state.route == "settings":
                 label_visibility="collapsed",
             )
 
+            # Upstream proxy (IP rotation — the most realistic block on big runs
+            # is per-IP rate limiting). Leave blank for a direct connection.
+            st.markdown(
+                cota_theme.setting_text(
+                    "Proxy (optional)",
+                    "Route Chrome through an upstream proxy as scheme://host:port "
+                    "(e.g. http://gw.proxy.com:8000). Use an IP-whitelisted gateway "
+                    "for authenticated proxies. Blank = direct connection.",
+                ),
+                unsafe_allow_html=True,
+            )
+            st.session_state.settings["proxy"] = st.text_input(
+                "Proxy",
+                value=st.session_state.settings.get("proxy", ""),
+                key="setting_proxy_default",
+                placeholder="http://host:port  (blank = none)",
+                label_visibility="collapsed",
+            ).strip()
+
             # Build / version info at the bottom of the card
             st.markdown(
                 f'<div class="cota-env-row" style="margin-top:8px">'
@@ -1129,7 +1151,10 @@ if st.session_state.route == "fidc":
             use_stealth = st.session_state.settings["stealth"]
             headless = st.session_state.settings["headless"]
             if use_stealth:
-                scraper = StealthANBIMAScraper(headless=headless)
+                scraper = StealthANBIMAScraper(
+                    headless=headless,
+                    proxy=st.session_state.settings.get("proxy") or None,
+                )
             else:
                 from anbima_scraper import ANBIMAScraper
 
@@ -1753,7 +1778,10 @@ if st.session_state.phase == "scrape":
     try:
         # Initialize scraper
         if use_stealth:
-            scraper = StealthANBIMAScraper(headless=headless)
+            scraper = StealthANBIMAScraper(
+                headless=headless,
+                proxy=st.session_state.settings.get("proxy") or None,
+            )
         else:
             from anbima_scraper import ANBIMAScraper
 

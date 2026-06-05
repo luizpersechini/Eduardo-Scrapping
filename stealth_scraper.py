@@ -112,16 +112,23 @@ def subclass_matches(desired: str, sub: dict) -> bool:
 class StealthANBIMAScraper:
     """Undetected ChromeDriver-based scraper for ANBIMA fund data"""
 
-    def __init__(self, headless: bool = False):
+    def __init__(self, headless: bool = False, proxy: Optional[str] = None):
         """
         Initialize the stealth scraper
 
         Args:
             headless: Whether to run browser in headless mode
+            proxy: Optional upstream proxy as scheme://host:port (e.g.
+                "http://gw.proxy.com:8000" or "socks5://1.2.3.4:1080"). Used to
+                rotate IPs / avoid rate-limit blocks. Authenticated proxies
+                should use an IP-whitelisted gateway — Chrome's --proxy-server
+                can't pass user:pass inline (those credentials are stripped and
+                a warning logged).
         """
         self.driver = None
         self.wait = None
         self.headless = headless
+        self.proxy = self._normalize_proxy(proxy)
         self.logger = logging.getLogger(__name__)
         self.rate_limit_count = 0
         # Captures the last setup_driver() error so the UI can show real diagnostics
@@ -185,6 +192,27 @@ class StealthANBIMAScraper:
                 except Exception:
                     pass
 
+    @staticmethod
+    def _normalize_proxy(proxy: Optional[str]) -> Optional[str]:
+        """Return a Chrome --proxy-server value (scheme://host:port) or None.
+
+        Strips inline user:pass credentials (Chrome can't use them via
+        --proxy-server) and trims whitespace. Defaults missing scheme to http.
+        """
+        if not proxy or not str(proxy).strip():
+            return None
+        p = str(proxy).strip()
+        scheme = ""
+        if "://" in p:
+            scheme, rest = p.split("://", 1)
+        else:
+            rest = p
+        # Drop credentials if present (user:pass@host:port)
+        if "@" in rest:
+            rest = rest.split("@", 1)[1]
+        scheme = scheme or "http"
+        return f"{scheme}://{rest}"
+
     def _common_chrome_args(self):
         """Chrome flags that are safe on both undetected-chromedriver and plain Selenium.
 
@@ -193,7 +221,7 @@ class StealthANBIMAScraper:
         in containerised Chromium 120+. Removed to fix "Chrome instance exited" on
         Streamlit Cloud.
         """
-        return [
+        args = [
             "--no-sandbox",
             "--disable-dev-shm-usage",
             "--disable-gpu",
@@ -211,6 +239,12 @@ class StealthANBIMAScraper:
             "--disable-ipc-flooding-protection",
             "--disable-blink-features=AutomationControlled",
         ]
+        # Route all traffic through the upstream proxy (IP rotation / rate-limit
+        # avoidance). Use an IP-whitelisted gateway for authenticated proxies.
+        if self.proxy:
+            args.append(f"--proxy-server={self.proxy}")
+            self.logger.info(f"Using proxy: {self.proxy}")
+        return args
 
     def _find_system_chromedriver_copy(self):
         """On Linux, copy system chromedriver to a writable /tmp path so UC can patch it.
