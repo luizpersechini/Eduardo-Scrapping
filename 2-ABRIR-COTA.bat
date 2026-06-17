@@ -29,8 +29,8 @@ echo    Para FECHAR o programa: feche esta janela preta.
 echo ============================================================
 echo.
 
-REM Abre o navegador sozinho depois de alguns segundos.
-start "" cmd /c "timeout /t 8 /nobreak >nul & start "" http://localhost:8501"
+REM Abre o navegador sozinho depois de alguns segundos (sem aspas aninhadas).
+start "" /min cmd /c "timeout /t 8 /nobreak >nul & start http://localhost:8501"
 
 REM Inicia o programa (fica rodando nesta janela).
 python -m streamlit run streamlit_app.py --server.port=8501 --server.headless=true --browser.gatherUsageStats=false
