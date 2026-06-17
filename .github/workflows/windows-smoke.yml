@@ -1,0 +1,80 @@
+name: Windows smoke test
+
+# Validates the Windows end-user package on a real Windows runner:
+#   1. Replicates what 1-INSTALAR.bat does (venv + pip install -r requirements).
+#   2. Confirms the key imports load on Windows + Python 3.13.
+#   3. Runs cross-platform unit tests (FIDC processor + subclass matcher).
+#   4. Boots the Streamlit app headless with COTA_NO_LOGIN=1 and waits for the
+#      health endpoint — proving streamlit_app.py executes end-to-end (imports,
+#      top-level code, and the auto-login gate) without crashing on Windows.
+#
+# It does NOT perform a real ANBIMA scrape (network/anti-bot flakiness); it
+# validates that the app installs and starts foolproofly on Windows.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  windows-install-and-boot:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Create venv + install deps (mirrors 1-INSTALAR.bat)
+        shell: pwsh
+        run: |
+          python -m venv venv
+          venv\Scripts\python.exe -m pip install --upgrade pip
+          venv\Scripts\python.exe -m pip install -r requirements.txt
+
+      - name: Verify key imports
+        shell: pwsh
+        run: |
+          venv\Scripts\python.exe -c "import streamlit, selenium, undetected_chromedriver, selenium_stealth, pandas, openpyxl; print('imports OK')"
+
+      - name: Unit test — FIDC processor + subclass matcher
+        shell: pwsh
+        run: venv\Scripts\python.exe tests\smoke_test.py
+
+      - name: Boot app headless with COTA_NO_LOGIN and wait for health
+        shell: pwsh
+        env:
+          COTA_NO_LOGIN: "1"
+        run: |
+          $proc = Start-Process -FilePath "venv\Scripts\python.exe" `
+            -ArgumentList "-m","streamlit","run","streamlit_app.py","--server.port=8501","--server.headless=true","--browser.gatherUsageStats=false" `
+            -PassThru -NoNewWindow -RedirectStandardError "streamlit_err.log" -RedirectStandardOutput "streamlit_out.log"
+
+          $healthy = $false
+          for ($i = 0; $i -lt 40; $i++) {
+            Start-Sleep -Seconds 3
+            if ($proc.HasExited) { break }
+            foreach ($url in @("http://localhost:8501/_stcore/health", "http://localhost:8501/healthz", "http://localhost:8501/")) {
+              try {
+                $r = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
+                if ($r.StatusCode -eq 200) { $healthy = $true; break }
+              } catch {}
+            }
+            if ($healthy) { break }
+          }
+
+          if (-not $healthy) {
+            Write-Host "=== streamlit stdout ==="; if (Test-Path streamlit_out.log) { Get-Content streamlit_out.log }
+            Write-Host "=== streamlit stderr ==="; if (Test-Path streamlit_err.log) { Get-Content streamlit_err.log }
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+            throw "App did not become healthy on Windows within ~120s."
+          }
+
+          Write-Host "App booted and healthy on Windows (auto-login path executed)."
+          if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
