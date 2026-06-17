@@ -1,61 +1,60 @@
-# Running the ANBIMA Scraper on Windows
+# Running on Windows (end-user package)
 
-A simple local launcher (`run_windows.bat`) is included. It creates a
-virtual environment the first time you run it, installs all dependencies,
-and starts the Streamlit app in your browser.
+This repo ships a **foolproof two-click Windows setup** aimed at a
+non-technical user (Eduardo). Everything is in Portuguese for him; this file
+is the English/developer reference.
 
-## Prerequisites (one-time installs)
+## The two scripts (repo root)
 
-1. **Python 3.11 or newer** — https://www.python.org/downloads/windows/
-   - **IMPORTANT:** During the installer, tick **"Add python.exe to PATH"**.
+| File               | When      | What it does                                                                                                                                            |
+| ------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1-INSTALAR.bat`   | once      | Checks for Python 3.11+ and Chrome (opens the download page with plain-language instructions if missing), creates `venv\`, installs `requirements.txt`. |
+| `2-ABRIR-COTA.bat` | every use | Activates `venv\`, sets `COTA_NO_LOGIN=1`, starts Streamlit on port 8501, and opens the browser automatically. Closing the black window stops the app.  |
+
+`LEIA-ME.txt` is the Portuguese quick-start the user reads first.
+
+## Handing it to the end user
+
+1. GitHub → **Code → Download ZIP**, or `git clone`.
+2. Send the folder (ZIP/USB/Drive). It contains everything tracked — no
+   secrets (`.env`, credentials, scraped data are gitignored).
+3. Tell them: **read `LEIA-ME.txt`, double-click `1-INSTALAR` once, then
+   `2-ABRIR-COTA` to use.**
+
+The scripts use `%~dp0` (their own folder), so the extracted folder can have
+any name and live anywhere.
+
+## No login on the local copy
+
+`2-ABRIR-COTA.bat` sets the env var `COTA_NO_LOGIN=1`, which makes
+`streamlit_app.py` skip the login screen (single-user local app). **Streamlit
+Cloud never sets this var**, so the public deployment keeps its login intact.
+
+## Headless
+
+The scraper's "Headless browser" toggle defaults **OFF** off-cloud (Windows
+included) — a visible Chrome window is the reliable mode. The
+`--server.headless=true` flag in `2-ABRIR-COTA.bat` is the _Streamlit server_
+flag (stops the email prompt / double browser tab) and is unrelated.
+
+## Prerequisites the user installs once
+
+1. **Python 3.11+** — https://www.python.org/downloads/windows/ — must tick
+   **"Add python.exe to PATH"** (the installer guides them; `1-INSTALAR`
+   re-opens this page if Python is missing).
 2. **Google Chrome** — https://www.google.com/chrome/
-   - The scraper drives a real Chrome browser, so Chrome must be installed.
-3. (Optional but recommended) Git — https://git-scm.com/download/win
-   - Only needed if you want to pull updates with `git pull`.
 
-## How to get the code
+## Updating their copy
 
-Either:
-- Click **Code → Download ZIP** on GitHub and extract it, **or**
-- Run `git clone https://github.com/luizpersechini/Eduardo-Scrapping.git`
-
-## First run
-
-1. Open the project folder in Windows Explorer.
-2. Double-click `run_windows.bat`.
-3. A terminal window opens. On the first run it will:
-   - Create a `venv\` folder next to the scripts.
-   - Install all Python dependencies (a few minutes).
-4. When setup finishes, the Streamlit UI opens automatically in your default
-   browser at `http://localhost:8501`.
-
-## Subsequent runs
-
-Just double-click `run_windows.bat` again. It will reuse the existing `venv\`
-and launch the app in a few seconds.
-
-## Stopping the app
-
-Close the terminal window, or press `Ctrl+C` in it.
-
-## Updating
-
-- If you cloned the repo: `git pull` inside the folder, then re-run the launcher.
-- If you downloaded a ZIP: download the new ZIP and replace files (keep your
-  `venv\` folder to avoid reinstalling dependencies, or delete it to force
-  a clean reinstall on the next run).
-
-## Notes on headless mode
-
-On your local Windows machine you should **uncheck "Headless Mode"** in the
-app's sidebar. A visible Chrome window is much less likely to trigger
-ANBIMA's anti-bot defenses than a headless one.
+Send a fresh ZIP and have them replace the files (they can keep their `venv\`
+to skip reinstalling, or delete it to force a clean reinstall via `1-INSTALAR`).
 
 ## Troubleshooting
 
-- **"Python is not installed or not in PATH"** — reinstall Python and make sure
-  you tick "Add python.exe to PATH", then open a new terminal / re-run the bat.
-- **Dependency install fails** — delete the `venv\` folder and re-run
-  `run_windows.bat` to start over.
-- **ChromeDriver errors** — update Chrome to the latest version; the scraper
-  matches the installed Chrome version automatically.
+- **"Python não foi encontrado"** — install Python with the PATH checkbox, re-run `1-INSTALAR`.
+- **Install fails** — check internet; delete `venv\` and re-run `1-INSTALAR`.
+- **"Failed to initialize web driver"** — close the black window, re-open via
+  `2-ABRIR-COTA`. undetected-chromedriver auto-fetches a driver matching the
+  installed Chrome; the plain-Selenium fallback covers UC failures.
+- **Slow / stuck run** — close the black window and reopen; partial results
+  are saved and downloadable from the **History** tab.

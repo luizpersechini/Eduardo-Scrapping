@@ -1,0 +1,85 @@
+============================================================
+  COTA — Raspador de Fundos ANBIMA
+  Guia rápido (Windows)
+============================================================
+
+O que é: um programa que abre no seu navegador, lê uma planilha
+de CNPJs e baixa os dados dos fundos da ANBIMA em Excel.
+
+
+------------------------------------------------------------
+PRIMEIRA VEZ (só precisa fazer uma vez)
+------------------------------------------------------------
+
+1) Dê dois cliques no arquivo:
+
+        1-INSTALAR
+
+   - Se aparecer um aviso pedindo o "Python": o programa vai
+     abrir a página de download. Instale o Python e, MUITO
+     IMPORTANTE, na primeira tela MARQUE a caixinha:
+
+            [ X ] Add python.exe to PATH
+
+     Depois clique em "Install Now". Quando terminar, dê dois
+     cliques no 1-INSTALAR de novo.
+
+   - Se aparecer um aviso pedindo o "Google Chrome": instale o
+     Chrome (a página abre sozinha) e rode o 1-INSTALAR de novo.
+
+   - Quando aparecer "PRONTO! Instalação concluída", pode fechar.
+
+
+------------------------------------------------------------
+PARA USAR (todos os dias)
+------------------------------------------------------------
+
+2) Dê dois cliques no arquivo:
+
+        2-ABRIR-COTA
+
+   - Vai abrir uma janela preta. DEIXE ela aberta.
+   - Em alguns segundos o programa abre sozinho no navegador.
+   - Para FECHAR o programa, é só fechar a janela preta.
+
+
+------------------------------------------------------------
+COMO RASPAR OS DADOS
+------------------------------------------------------------
+
+No navegador:
+
+  • Aba "New scrape": para fundos normais.
+  • Aba "FIDC": para FIDCs (um CNPJ pode ter várias subclasses).
+
+Passo a passo:
+  1. Clique em "Upload" e escolha sua planilha Excel.
+     A planilha precisa ter uma coluna chamada  CNPJ .
+  2. Confira a lista e clique em "Start".
+  3. Acompanhe o progresso. Quando terminar, clique em
+     "Download Excel" para salvar o resultado.
+
+  • Se um dia parar no meio, o que já foi raspado fica salvo.
+    Veja na aba "History" e baixe o Excel parcial.
+
+
+------------------------------------------------------------
+DICAS / PROBLEMAS COMUNS
+------------------------------------------------------------
+
+  • Deixe o Chrome aparecer na tela enquanto raspa (não mexa
+    nele). É normal abrir janelas do navegador sozinho.
+
+  • Se der erro logo no começo ("Failed to initialize"):
+    feche a janela preta, abra de novo com o 2-ABRIR-COTA.
+
+  • Se o programa ficar muito lento ou travar: feche a janela
+    preta e abra de novo. O que já foi raspado fica salvo na
+    aba "History".
+
+  • Precisa de internet para funcionar.
+
+
+------------------------------------------------------------
+Em caso de dúvida, chame o Luiz.
+============================================================

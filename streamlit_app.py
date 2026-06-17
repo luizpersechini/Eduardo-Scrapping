@@ -184,6 +184,13 @@ def login_page():
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
+# Local desktop builds (Eduardo's Windows package) set COTA_NO_LOGIN=1 so the
+# single-user local app skips the login screen entirely. Streamlit Cloud never
+# sets this env var, so the public deployment keeps its login intact.
+if os.environ.get("COTA_NO_LOGIN") == "1":
+    st.session_state.authenticated = True
+    st.session_state.setdefault("user", "eduardo")
+
 # Show login page if not authenticated
 if not st.session_state.authenticated:
     login_page()
