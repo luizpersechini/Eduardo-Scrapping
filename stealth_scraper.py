@@ -13,9 +13,74 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
 
+def _windows_chrome_major() -> Optional[int]:
+    """Detect Chrome's major version on Windows.
+
+    `chrome.exe --version` prints nothing to stdout on Windows, so UC ends up
+    grabbing the *latest* ChromeDriver instead of the one matching the installed
+    Chrome (e.g. driver 150 vs Chrome 149 → SessionNotCreatedException). We read
+    the version from the registry (most reliable) and, failing that, from the
+    chrome.exe file metadata.
+    """
+    import platform
+
+    if platform.system() != "Windows":
+        return None
+    # 1) Registry: HKCU/HKLM\Software\Google\Chrome\BLBeacon\version
+    try:
+        import winreg  # Windows-only
+
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            for subkey in (
+                r"Software\Google\Chrome\BLBeacon",
+                r"Software\Wow6432Node\Google\Chrome\BLBeacon",
+            ):
+                try:
+                    with winreg.OpenKey(hive, subkey) as k:
+                        ver, _ = winreg.QueryValueEx(k, "version")
+                        if ver:
+                            return int(str(ver).split(".")[0])
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    # 2) chrome.exe file metadata via PowerShell
+    for base in (
+        os.environ.get("ProgramFiles", r"C:\Program Files"),
+        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+        os.environ.get("LocalAppData", ""),
+    ):
+        if not base:
+            continue
+        exe = os.path.join(base, "Google", "Chrome", "Application", "chrome.exe")
+        if os.path.exists(exe):
+            try:
+                out = subprocess.check_output(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        f"(Get-Item '{exe}').VersionInfo.ProductVersion",
+                    ],
+                    stderr=subprocess.DEVNULL,
+                    timeout=10,
+                ).decode(errors="replace")
+                m = re.search(r"(\d+)\.", out)
+                if m:
+                    return int(m.group(1))
+            except Exception:
+                pass
+    return None
+
+
 def get_chrome_version() -> int:
-    """Detect installed Chrome major version at runtime"""
-    # Try all known Chrome paths
+    """Detect installed Chrome major version at runtime."""
+    # Windows first — registry/file metadata (chrome.exe --version is silent there).
+    win = _windows_chrome_major()
+    if win:
+        return win
+
+    # macOS / Linux — chrome --version works.
     chrome_paths = [
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         "/usr/bin/google-chrome",
