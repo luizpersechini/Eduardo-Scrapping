@@ -65,6 +65,9 @@ graphify-out/
 # not shared (CNPJs and fund data may be sensitive).
 results/
 
+# Downloaded/extracted CVM open-data files (re-downloadable, large)
+cvm_cache/
+
 # Generated graphify artifacts (root copies)
 architecture.html
 architecture.json
