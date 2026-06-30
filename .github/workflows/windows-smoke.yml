@@ -51,6 +51,10 @@ jobs:
         shell: pwsh
         run: venv\Scripts\python.exe tests\cvm_ingest_test.py
 
+      - name: Unit test — CVM Streamlit route (AppTest, no network)
+        shell: pwsh
+        run: venv\Scripts\python.exe tests\cvm_route_test.py
+
       - name: Boot app headless with COTA_NO_LOGIN and wait for health
         shell: pwsh
         env:
