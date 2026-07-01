@@ -13,34 +13,73 @@ echo  Isso pode demorar alguns minutos. Aguarde.
 echo.
 
 REM ---------------------------------------------------------------
-REM  1) Procurar o Python (precisa ser 3.11 ou mais novo)
+REM  1) Procurar o Python (3.11 ou mais novo).
+REM     Tentamos, nesta ordem:
+REM       a) o lancador  py -3
+REM       b) o comando   python  (se estiver no PATH)
+REM       c) procurar o python.exe nas pastas padrao de instalacao
+REM          (assim, mesmo com o PATH "desatualizado" logo apos
+REM           instalar o Python, ainda encontramos ele)
 REM ---------------------------------------------------------------
 set "PYCMD="
-py -3 -c "import sys;sys.exit(0 if sys.version_info>=(3,11) else 1)" >nul 2>nul && set "PYCMD=py -3"
+
+REM a) lancador py
+py -3 --version >nul 2>nul && set "PYCMD=py -3"
+
+REM b) python no PATH
 if not defined PYCMD (
-    python -c "import sys;sys.exit(0 if sys.version_info>=(3,11) else 1)" >nul 2>nul && set "PYCMD=python"
+    python --version >nul 2>nul && set "PYCMD=python"
+)
+
+REM c) procurar nas pastas padrao (usuario e todos os usuarios).
+REM     Capturamos as variaveis de ambiente em nomes SEM parenteses
+REM     (ProgramFiles(x86) quebraria o bloco "for (...)").
+set "LAD=%LocalAppData%"
+set "PF=%ProgramFiles%"
+set "PF86=%ProgramFiles(x86)%"
+if not defined PYCMD (
+    for %%D in (Python314 Python313 Python312 Python311) do (
+        if not defined PYCMD if exist "!LAD!\Programs\Python\%%D\python.exe" (
+            set "PATH=!LAD!\Programs\Python\%%D;!LAD!\Programs\Python\%%D\Scripts;!PATH!"
+            set "PYCMD=python"
+        )
+        if not defined PYCMD if exist "!PF!\%%D\python.exe" (
+            set "PATH=!PF!\%%D;!PF!\%%D\Scripts;!PATH!"
+            set "PYCMD=python"
+        )
+        if not defined PYCMD if exist "!PF86!\%%D\python.exe" (
+            set "PATH=!PF86!\%%D;!PF86!\%%D\Scripts;!PATH!"
+            set "PYCMD=python"
+        )
+    )
 )
 
 if not defined PYCMD (
-    echo [ATENCAO] O Python nao foi encontrado no seu computador.
+    echo [ATENCAO] O Python nao foi encontrado.
     echo.
-    echo  Vou abrir a pagina de download do Python.
+    echo  Se voce ACABOU de instalar o Python:
+    echo     REINICIE o computador e clique no 1-INSTALAR de novo.
+    echo     (O Windows so "enxerga" o Python depois de reiniciar.)
     echo.
-    echo  IMPORTANTE - na primeira tela da instalacao do Python,
-    echo  MARQUE a caixinha que diz:
-    echo.
-    echo        [ X ]  Add python.exe to PATH
-    echo.
-    echo  (ela fica embaixo, antes do botao "Install Now")
-    echo.
-    echo  Depois que terminar de instalar o Python, FECHE esta janela
-    echo  e clique novamente no arquivo  1-INSTALAR .
+    echo  Se voce AINDA NAO instalou o Python:
+    echo     Vou abrir a pagina de download.
+    echo     Na PRIMEIRA tela da instalacao, MARQUE a caixinha:
+    echo         [ X ]  Add python.exe to PATH
+    echo     Depois clique em "Install Now", REINICIE o computador
+    echo     e clique no 1-INSTALAR de novo.
     echo.
     pause
     start "" https://www.python.org/downloads/
     exit /b 1
 )
-echo  - Python encontrado.
+echo  - Python encontrado (!PYCMD!).
+
+REM  Aviso se a versao for antiga (menor que 3.11), mas nao bloqueia.
+%PYCMD% -c "import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)" >nul 2>nul
+if errorlevel 1 (
+    echo [ATENCAO] Sua versao do Python parece antiga.
+    echo  Recomendado: Python 3.11 ou mais novo. Vou tentar mesmo assim.
+)
 
 REM ---------------------------------------------------------------
 REM  2) Procurar o Google Chrome
