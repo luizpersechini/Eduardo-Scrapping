@@ -12,8 +12,8 @@ How the pieces of Cota / the ANBIMA scraper fit together.
        ┌──────────────────────────┼──────────────────────────┐
        │                          │                          │
    cota_theme.py            session state             route dispatch
-   (CSS + HTML helpers)     (auth, phase, settings,    (scrape/history/
-                            cnpjs, results,             settings)
+   (CSS + HTML helpers)     (auth, phase, settings,    (scrape/fidc/cvm/
+                            cnpjs, results,             history/settings)
                             activity_events)
        │                          │
        └──────────────────────────┴──────────────────────────┐
@@ -46,12 +46,22 @@ Streamlit UI entry point. Owns:
   `scraping_in_progress`, `stop_scraping`, `progress`, `success_count`,
   `failed_count`, `status_messages`, `activity_events`, `start_time`,
   `results`, `uploaded_filename`, `_last_diag`, etc.
-- **Routes**: `scrape` (default), `history`, `settings`. The topbar HTML
-  is rendered by `cota_theme.topbar`; the actual route switch is the
-  small button row right under it.
-- **Phases (scrape route only)**: `upload → review → scrape → done`.
+- **Routes**: `scrape` (default), `fidc`, `cvm`, `history`, `settings`.
+  The topbar HTML is rendered by `cota_theme.topbar`; the actual route
+  switch is the small button row right under it.
+- **Phases**: `upload → review → scrape → done` in the scrape route;
+  the `fidc` and `cvm` routes mirror the same phase pattern with their
+  own session-state keys (`fidc_*`, `cvm_*`).
   Each phase is a self-contained block; transitions set
   `st.session_state.phase` then `st.rerun()`.
+- **Resilience during a run**:
+  - _Incremental save_ — after every CNPJ the collected results are
+    written to `results/<kind>_results_<ts>_partial.xlsx`, so a killed
+    process (or Stop) keeps everything scraped so far. On success the
+    partial is replaced by the final file.
+  - _Circuit breaker_ — if the driver is permanently dead (recovery
+    exhausted), the run aborts immediately with the partial results
+    instead of burning the recovery loop on every remaining CNPJ.
 
 The scrape phase pre-creates four `st.empty()` slots
 (`hero_slot`, `bar_slot`, `activity_slot`, `status_slot`) and rewrites
@@ -105,6 +115,10 @@ shown verbatim in the UI.
   `use_subprocess=False` (the subprocess launch path causes the
   headless window to die on first navigation on Mac).
 
+On Windows, `chrome.exe --version` prints nothing, so the Chrome major
+is read from the registry (`BLBeacon\version`) — without it UC guesses
+the newest driver and mismatches the installed browser.
+
 Anti-detection on top of UC:
 
 - A small set of safe Chrome args (no
@@ -115,13 +129,29 @@ Anti-detection on top of UC:
   on every page load.
 
 The recovery loop you see in logs ("attempting recovery (attempt 1/3)")
-is a *separate* mechanism that fires when the driver becomes
-unresponsive *during* a scrape (window closed, connection refused). It
+is a _separate_ mechanism that fires when the driver becomes
+unresponsive _during_ a scrape (window closed, connection refused). It
 calls `close()` and then `setup_driver()` again.
 
 `close()` does a graceful `driver.quit()` and on Linux follows it with
 `pkill -9 -f chromedriver|chrome|chromium` to make sure no zombie
 process stays around to eat into the Streamlit Cloud RAM ceiling.
+
+FIDC support lives in three additional methods on the same class:
+
+- `search_fidc_subclasses(cnpj)` — like `search_fund` up to the results
+  page, but collects **all** result anchors instead of clicking the
+  first one (a FIDC CNPJ can map to several subclasses).
+- `extract_fidc_periodic_data()` — generalised table reader that
+  keyword-matches all 6 FIDC columns (competência, PL, cota,
+  aplicações, resgates, cotistas).
+- `scrape_fidc_data(cnpj)` — orchestrates the two above per subclass
+  and returns `{CNPJ, Status, subclasses: [...]}`.
+
+An optional **upstream proxy** (`proxy` ctor arg, Settings field in the
+UI) is passed to Chrome as `--proxy-server` for IP rotation on large
+batches. Use an IP-whitelisted gateway — Chrome's flag carries no
+credentials.
 
 ### `anbima_scraper.py`
 
@@ -132,14 +162,44 @@ is toggled off in the UI. Same scrape interface (`scrape_fund_data`).
 
 Takes the per-CNPJ scraper output and:
 
-- Pivots the periodic data into a flat row-per-(CNPJ, period, value).
-- Cleans up nulls / unifies column names.
-- Returns a pandas DataFrame ready for `to_excel`.
+- Pivots the regular-scrape periodic data into a date × CNPJ pivot
+  with a two-row header (fund name / "Valor cota").
+- Flattens FIDC results into a long/tidy frame
+  (`process_fidc_data`): one row per subclasse × competência date.
+- Cleans values for Excel: `to_date()` turns `dd/mm/yyyy` strings into
+  real datetimes, `brl_to_number()` strips `R$ ` and Brazilian
+  thousand/decimal separators into plain floats.
+- `write_excel(df, target)` is the **single Excel writer** used by
+  every output path (regular, FIDC, CVM; UI and CLI). It forces
+  `DD/MM/YYYY` display on every date cell — including the
+  regular pivot's mixed-type date column, which pandas'
+  `datetime_format` option alone would skip.
+
+### `cvm_downloader.py` / `cvm_processor.py` / `main_cvm.py`
+
+The ANBIMA-independent quota source. CVM publishes every fund's daily
+quotas as a monthly CSV (`inf_diario_fi_YYYYMM.zip`) on
+dados.cvm.gov.br — no scraping, no anti-bot risk.
+
+- `cvm_downloader` — lists available months, resolves the target month
+  (default: second-to-last published, since the current month is
+  incomplete), downloads the zip (write-then-rename, cached in
+  `cvm_cache/`), extracts the CSV.
+- `cvm_processor.load_quotas(csv, cnpjs)` — reads only the needed
+  columns, filters to the requested CNPJs, keeps `ID_SUBCLASSE` as a
+  disambiguator, coerces dates/numbers, and returns the same tidy
+  column shape as the FIDC output.
+- `main_cvm.py` — CLI wrapper: `python main_cvm.py input.xlsx
+[--month YYYYMM]`.
+
+The `cvm` route in the UI is the same upload → review → run → done
+flow, minus the browser.
 
 ### `config.py`
 
-Page URLs, CSS/XPath selectors, timeouts. Change here when ANBIMA's
-DOM shifts.
+Page URLs, CSS/XPath selectors, timeouts, and the `CVM_*` settings
+(base URL, filename pattern, cache dir, column map). Change here when
+ANBIMA's DOM or CVM's schema shifts.
 
 ### `main.py` / `main_parallel.py`
 
@@ -187,7 +247,7 @@ needs special care:
 - `--disable-dev-shm-usage` is essential — `/dev/shm` is too small in
   the container for Chrome's default shared-memory IPC.
 - 12-hour hibernation is policy. The fixes above prevent the
-  *unscheduled* container kills caused by RAM exhaustion; the daily
+  _unscheduled_ container kills caused by RAM exhaustion; the daily
   hibernation is unavoidable on the free tier.
 
 See [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md) for the failure modes

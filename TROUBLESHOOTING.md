@@ -21,6 +21,11 @@ binary on the host. Fixed in v2.0.0 by always passing
 `get_chrome_version()` returned `None` — verify Chrome is on PATH or in
 one of the standard locations checked in `stealth_scraper.py`.
 
+On **Windows** specifically, `chrome.exe --version` prints nothing, so
+version detection reads the registry (`HKCU\Software\Google\Chrome\
+BLBeacon\version`) since v2.2.0. If a stale driver is already cached,
+delete `%APPDATA%\undetected_chromedriver` and relaunch.
+
 ### `SessionNotCreatedException: cannot connect to chrome at 127.0.0.1:NNNNN from chrome not reachable`
 
 Chrome started but immediately died. On macOS this is almost always
@@ -114,6 +119,40 @@ Other column names are ignored.
 
 ---
 
+## Excel dates show as text / need "Text to Columns"
+
+Fixed in v2.4.0 — `DataProcessor.write_excel` writes real date cells
+formatted `DD/MM/YYYY` and numeric quota values (no `R$ ` prefix). If a
+spreadsheet still shows text dates, it was produced by an older version;
+re-run the scrape or re-export.
+
+---
+
+## ANBIMA keeps blocking a big batch
+
+Use the **CVM route** instead — it downloads the official
+`inf_diario_fi` monthly CSV from dados.cvm.gov.br and filters it to your
+CNPJs. No browser, no anti-bot exposure. Caveats:
+
+- Monthly granularity of publication (current month is incomplete; the
+  app defaults to the second-to-last published month).
+- CNPJs must match CVM's registry exactly — the run report lists
+  requested CNPJs that matched no rows.
+- First run per month downloads a large zip into `cvm_cache/`;
+  subsequent runs reuse the cache.
+
+---
+
+## Scrape died mid-run — is the data lost?
+
+No. Both scrape flows write `results/<kind>_results_<ts>_partial.xlsx`
+after **every** CNPJ. Open **History** and download the run tagged
+⚠ Partial. A permanently-dead driver also trips a circuit breaker that
+ends the run early with those partial results instead of grinding
+through the recovery loop for each remaining CNPJ.
+
+---
+
 ## Settings page diagnostics
 
 Click **Re-run diagnostics** to see:
@@ -122,7 +161,7 @@ Click **Re-run diagnostics** to see:
 - Chromium binary path + version.
 - ChromeDriver binary path + version.
 - Result of a real headless launch against `about:blank`, including
-  Chromium's stderr (this is what tells you *why* Chrome is crashing
+  Chromium's stderr (this is what tells you _why_ Chrome is crashing
   when it does).
 - `/dev/shm` total + free (Linux only).
 - `/proc/meminfo` (Linux only).

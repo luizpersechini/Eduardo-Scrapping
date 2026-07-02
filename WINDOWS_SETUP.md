@@ -4,12 +4,13 @@ This repo ships a **foolproof two-click Windows setup** aimed at a
 non-technical user (Eduardo). Everything is in Portuguese for him; this file
 is the English/developer reference.
 
-## The two scripts (repo root)
+## The three scripts (repo root)
 
-| File               | When      | What it does                                                                                                                                            |
-| ------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `1-INSTALAR.bat`   | once      | Checks for Python 3.11+ and Chrome (opens the download page with plain-language instructions if missing), creates `venv\`, installs `requirements.txt`. |
-| `2-ABRIR-COTA.bat` | every use | Activates `venv\`, sets `COTA_NO_LOGIN=1`, starts Streamlit on port 8501, and opens the browser automatically. Closing the black window stops the app.  |
+| File               | When      | What it does                                                                                                                                                                                            |
+| ------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1-INSTALAR.bat`   | once      | Checks for Python 3.11+ and Chrome (opens the download page with plain-language instructions if missing), creates `venv\`, installs `requirements.txt`.                                                 |
+| `2-ABRIR-COTA.bat` | every use | Activates `venv\`, sets `COTA_NO_LOGIN=1`, starts Streamlit on port 8501, and opens the browser automatically. Closing the black window stops the app.                                                  |
+| `3-ATUALIZAR.bat`  | to update | Downloads the latest `main` as a zip from GitHub and copies the code over the install with `robocopy`, excluding `venv\`, `instance\`, `results\` and `EDUARDO_CREDENTIALS.txt`; re-runs `pip install`. |
 
 `LEIA-ME.txt` is the Portuguese quick-start the user reads first.
 
@@ -46,15 +47,37 @@ flag (stops the email prompt / double browser tab) and is unrelated.
 
 ## Updating their copy
 
-Send a fresh ZIP and have them replace the files (they can keep their `venv\`
-to skip reinstalling, or delete it to force a clean reinstall via `1-INSTALAR`).
+They double-click **`3-ATUALIZAR.bat`** — it fetches the latest `main`
+zip and overwrites only the code (their `venv\`, database, results and
+credentials are untouched), then they open `2-ABRIR-COTA` as usual.
+
+If their copy predates the updater, bootstrap it once from a cmd window
+opened _in the project folder_ (File Explorer address bar → type `cmd`
+→ Enter):
+
+```
+powershell -Command "iwr 'https://raw.githubusercontent.com/luizpersechini/Eduardo-Scrapping/main/3-ATUALIZAR.bat' -OutFile 3-ATUALIZAR.bat"
+```
 
 ## Troubleshooting
 
-- **"Python não foi encontrado"** — install Python with the PATH checkbox, re-run `1-INSTALAR`.
+- **"Python não foi encontrado"** — install Python with the PATH checkbox,
+  re-run `1-INSTALAR`. The installer also probes `py -3` and the default
+  install folders directly, so a stale PATH right after installing
+  usually resolves itself; a reboot always does.
+- **`python` opens the Microsoft Store** — Windows ships a Store stub
+  that hijacks the bare `python` command. Use the `py` launcher instead
+  (`py -m venv venv`), which the installer already prefers.
+- **Commands "can't find requirements.txt"** — they're running cmd in
+  `C:\Users\<name>` instead of the project folder. Open File Explorer in
+  the project folder, click the address bar, type `cmd`, Enter — the
+  window opens in the right place.
 - **Install fails** — check internet; delete `venv\` and re-run `1-INSTALAR`.
-- **"Failed to initialize web driver"** — close the black window, re-open via
-  `2-ABRIR-COTA`. undetected-chromedriver auto-fetches a driver matching the
-  installed Chrome; the plain-Selenium fallback covers UC failures.
+- **"Failed to initialize web driver" / driver-version mismatch** —
+  close the black window, re-open via `2-ABRIR-COTA`. Chrome's version
+  is read from the registry on Windows (since v2.2.0), so
+  driver/browser mismatches (e.g. driver 150 vs Chrome 149) shouldn't
+  recur; if one does, delete `%APPDATA%\undetected_chromedriver` and
+  relaunch.
 - **Slow / stuck run** — close the black window and reopen; partial results
   are saved and downloadable from the **History** tab.

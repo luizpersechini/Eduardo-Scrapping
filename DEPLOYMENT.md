@@ -58,16 +58,28 @@ window is reliable.
 
 ---
 
-## Local — Windows
+## Local — Windows (end-user package)
 
-Double-click `run_windows.bat`. The launcher:
+For the non-technical end user, the repo root ships three Portuguese
+batch files:
 
-- Verifies Python ≥ 3.11 is on PATH.
-- Verifies Google Chrome is installed.
-- Creates a `venv\` on first run and `pip install -r requirements.txt`.
-- Starts Streamlit and opens the default browser to `http://localhost:8501`.
+- `1-INSTALAR.bat` — once: Python/Chrome checks, `venv\`, deps.
+- `2-ABRIR-COTA.bat` — every use: sets `COTA_NO_LOGIN=1` (skips the
+  login screen locally; Streamlit Cloud never sets it, so the public
+  deployment keeps auth), starts Streamlit, opens the browser.
+- `3-ATUALIZAR.bat` — update: pulls the latest `main` zip from GitHub
+  over the install, preserving `venv\`, `instance\`, `results\` and
+  credentials.
 
-Full instructions are in `WINDOWS_SETUP.md`.
+Developers can use `run_windows.bat` instead. Full instructions in
+`WINDOWS_SETUP.md`.
+
+Every push to `main` runs the **Windows smoke test**
+(`.github/workflows/windows-smoke.yml`): a real `windows-latest` runner
+mirrors the installer, runs the unit tests (`tests/smoke_test.py`,
+`tests/cvm_ingest_test.py`, `tests/cvm_route_test.py`) and boots the
+app headless until healthy — so a broken end-user package fails CI
+before it reaches Eduardo.
 
 ---
 
@@ -76,8 +88,11 @@ Full instructions are in `WINDOWS_SETUP.md`.
 For scripted runs from the command line:
 
 ```bash
-python main.py            # serial scrape
+python main.py            # serial ANBIMA scrape
 python main_parallel.py   # parallel scrape (higher detection risk)
+
+python main_cvm.py input.xlsx              # CVM open-data quotas (no browser)
+python main_cvm.py input.xlsx --month 202605
 
 python verify_results.py    # post-run verification
 python monitor_progress.py  # tail a running scrape

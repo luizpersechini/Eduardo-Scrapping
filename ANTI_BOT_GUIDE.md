@@ -1,5 +1,23 @@
 # Anti-Bot Detection Troubleshooting Guide
 
+> **Updated 2026-07** — two additions since this guide was written:
+>
+> 1. **Upstream proxy support (v2.1.0).** The Settings route has a
+>    proxy field (`scheme://host:port`), passed to Chrome as
+>    `--proxy-server`, for IP rotation on large batches. Chrome's flag
+>    carries no credentials — use an IP-whitelisted gateway. This
+>    implements "Option 4 / proxy rotation" below without code changes.
+> 2. **The CVM route sidesteps anti-bot entirely (v2.3.0).** Daily
+>    quotas are published openly by CVM (`inf_diario_fi` monthly CSVs
+>    on dados.cvm.gov.br). If ANBIMA keeps blocking a batch, use the
+>    CVM route/`main_cvm.py` — no browser involved. ANBIMA scraping
+>    remains for data CVM doesn't publish the same way.
+>
+> Also note: on Windows the Chrome major is detected via the registry
+> (v2.2.0) — `chrome.exe --version` prints nothing there, and a wrong
+> major means UC pairs a mismatched chromedriver (instant failures that
+> can look like blocking).
+
 ## ⚠️ Critical Issue Identified
 
 Based on the error logs, **ANBIMA's website is detecting and blocking automated scraping**. The repeated ChromeDriver crashes are NOT random connection issues - they are ANBIMA's anti-bot system actively killing the browser connection.
@@ -32,17 +50,20 @@ Error searching for CNPJ: Connection refused
 ## ✅ Solutions Implemented in v1.0.4
 
 ### 1. Enhanced Stealth Mode
+
 - Override `navigator.webdriver` (makes it appear not automated)
 - Disable `AutomationControlled` blink features
 - Use CDP commands for realistic fingerprint
 - Exclude automation switches
 
 ### 2. Increased Delays
+
 - **Before**: 5-10 seconds between actions
 - **After**: 8-15 seconds between actions
 - More human-like browsing pattern
 
 ### 3. Headless Mode Now OFF by Default
+
 - **Visible browser** is MUCH harder to detect
 - Slightly slower but significantly better success rate
 - UI shows warning if headless enabled
@@ -52,12 +73,14 @@ Error searching for CNPJ: Connection refused
 ### Option 1: Run with Visible Browser (RECOMMENDED)
 
 **In Streamlit UI Settings:**
+
 1. ✅ Keep "Stealth Mode" **CHECKED**
 2. ❌ **UNCHECK** "Headless Mode"
 3. Browser window will open and scrape visibly
 4. Much better success rate
 
 **Trade-offs:**
+
 - ✅ Better success rate
 - ✅ Can see what's happening
 - ❌ Slightly slower
@@ -66,6 +89,7 @@ Error searching for CNPJ: Connection refused
 ### Option 2: Run Locally on Your Computer
 
 **Best for large batches (50+ CNPJs):**
+
 1. Install Python on your local machine
 2. Clone the GitHub repository
 3. Run scraper locally with visible browser
@@ -73,6 +97,7 @@ Error searching for CNPJ: Connection refused
 5. Can watch it work
 
 **Setup:**
+
 ```bash
 git clone https://github.com/luizpersechini/Eduardo-Scrapping.git
 cd Eduardo-Scrapping
@@ -83,6 +108,7 @@ streamlit run streamlit_app.py
 ### Option 3: Smaller Batches with Longer Delays
 
 **Instead of 60 CNPJs at once:**
+
 1. Split into batches of 10-15 CNPJs
 2. Run each batch separately
 3. Wait 30-60 minutes between batches
@@ -91,6 +117,7 @@ streamlit run streamlit_app.py
 ### Option 4: Rotate User Agents
 
 **(Advanced - requires code modification)**
+
 - Use different browser user agents
 - Rotate them between CNPJs
 - Appears like different users
@@ -98,14 +125,17 @@ streamlit run streamlit_app.py
 ## 🚫 What Won't Work
 
 ### ❌ Just Retrying Multiple Times
+
 - If anti-bot detected you, retrying immediately fails
 - Need to wait or change approach
 
 ### ❌ Running Faster
+
 - Speed makes detection MORE likely
 - Go slower, not faster
 
 ### ❌ Removing Delays
+
 - Human delays are CRITICAL
 - Without them, instant detection
 
@@ -114,12 +144,14 @@ streamlit run streamlit_app.py
 ### Check the Downloaded Log File:
 
 **Good signs (not blocked):**
+
 ```
 [1/60] SUCCESS: 12.345.678/0001-90 - 22 data points - 45.3s
 [2/60] SUCCESS: 23.456.789/0001-80 - 22 data points - 43.1s
 ```
 
 **Bad signs (being blocked):**
+
 ```
 ChromeDriver connection lost: Connection refused
 Error searching for CNPJ: Max retries exceeded
@@ -127,6 +159,7 @@ Remote end closed connection without response
 ```
 
 **Pattern to watch for:**
+
 - First 5-10 CNPJs succeed ✅
 - Then suddenly all fail ❌
 - **This means**: Anti-bot detected you mid-batch
@@ -134,6 +167,7 @@ Remote end closed connection without response
 ## 🛠️ Immediate Actions
 
 ### 1. Change Settings (Most Important)
+
 ```
 Settings in Streamlit UI:
 ☑️ Stealth Mode: ON
@@ -142,13 +176,16 @@ Settings in Streamlit UI:
 ```
 
 ### 2. Test with Small Batch First
+
 - Upload file with only 3-5 CNPJs
 - Watch if they all succeed
 - If yes, anti-bot evasion is working
 - If no, need more changes
 
 ### 3. Monitor the Visible Browser
+
 When headless mode is OFF:
+
 - You'll see Chrome window open
 - Watch if it completes actions
 - Look for CAPTCHA or blocking pages
@@ -159,16 +196,19 @@ When headless mode is OFF:
 ### With v1.0.4 Changes:
 
 **Visible Browser (Headless OFF):**
+
 - Expected: 80-95% success rate
 - First batch usually works well
 - May hit rate limits on large batches (50+)
 
 **Headless Mode (Headless ON):**
+
 - Expected: 30-60% success rate
 - More likely to be detected
 - May fail completely on cloud hosting
 
 **On Streamlit Cloud:**
+
 - Expected: 50-70% success rate
 - Cloud IPs may be flagged
 - Better to run locally if possible
@@ -176,6 +216,7 @@ When headless mode is OFF:
 ## 📊 Monitoring Strategy
 
 ### Run a Test Batch:
+
 1. Create Excel with 5 known-good CNPJs
 2. Run with headless OFF
 3. Watch the visible browser
@@ -183,6 +224,7 @@ When headless mode is OFF:
 5. Check success rate
 
 ### Example Test CNPJs:
+
 ```
 43.121.036/0001-36
 58.893.662/0001-18
@@ -243,6 +285,7 @@ When testing v1.0.4, please share:
 ## 🎓 Understanding Anti-Bot Systems
 
 Modern anti-bot systems check:
+
 - ✅ Browser fingerprint (we hide this)
 - ✅ JavaScript capabilities (we have these)
 - ✅ Mouse movements (we simulate these)

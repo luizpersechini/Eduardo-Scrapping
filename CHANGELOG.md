@@ -5,9 +5,105 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-07-02 — Excel formatting + one-click updater
+
+### Added
+
+- **`3-ATUALIZAR.bat`** — one-click Windows updater for the end-user
+  package. Downloads the latest `main` zip from GitHub and copies the
+  code over the install, excluding `venv\`, `instance/`, `results/`
+  and `EDUARDO_CREDENTIALS.txt`; re-runs `pip install` for new deps.
+- `brl_to_number()` / `to_date()` helpers in `data_processor.py`,
+  shared by the regular, FIDC and CVM output paths.
+- `DataProcessor.write_excel()` — single Excel writer used by every
+  output site (UI buffers, incremental partials, CLI `save_results`).
+
+### Changed
+
+- **Excel output**: date columns are real `dd/mm/yyyy` Excel date
+  cells (no more manual "Text to Columns" on Column A) and quota /
+  money columns are plain numbers with the `R$ ` prefix stripped.
+  Cotistas is an integer. Regular-scrape rows now sort
+  chronologically (datetime index instead of string).
+
+### Fixed
+
+- `datetime_format` alone skipped the regular pivot's date column
+  (object dtype from the two-row header) — `write_excel` stamps
+  `DD/MM/YYYY` on every date cell directly.
+
+## [2.3.0] - 2026-07-01 — CVM open-data ingest
+
+### Added
+
+- **CVM route** (UI) + **`main_cvm.py`** (CLI): fetch official daily
+  quotas from CVM's `inf_diario_fi` monthly CSVs on dados.cvm.gov.br
+  and filter to the uploaded CNPJs. No browser, no anti-bot risk —
+  an ANBIMA-independent source.
+- `cvm_downloader.py` (month listing/resolution, cached
+  write-then-rename downloads into `cvm_cache/`) and
+  `cvm_processor.py` (column-pruned CSV read, CNPJ filter,
+  subclass-aware tidy output matching the FIDC shape).
+- Tests: `tests/cvm_ingest_test.py`, `tests/cvm_route_test.py`
+  (Streamlit AppTest, no network), wired into the Windows CI smoke
+  test.
+
+### Fixed
+
+- `1-INSTALAR.bat` false "Python not found": now probes `py -3` /
+  `python --version` and searches the default install folders
+  directly, so a stale PATH right after installing Python no longer
+  blocks the install (`%ProgramFiles(x86)%` parenthesis handling
+  included).
+
+## [2.2.0] - 2026-06-19 — Windows end-user package + CI
+
+### Added
+
+- **Foolproof two-click Windows package** (Portuguese, for a
+  non-technical end user): `1-INSTALAR.bat` (Python/Chrome checks,
+  venv, deps) + `2-ABRIR-COTA.bat` (launch, auto-open browser).
+  `LEIA-ME.txt` quick-start.
+- `COTA_NO_LOGIN=1` env var skips the login screen on the local copy;
+  Streamlit Cloud never sets it, so the public deployment keeps auth.
+- **GitHub Actions Windows smoke test**
+  (`.github/workflows/windows-smoke.yml`): real `windows-latest`
+  runner mirrors the installer, verifies imports, runs the unit
+  tests, and boots the app headless until healthy.
+
+### Fixed
+
+- **Chrome version detection on Windows** — `chrome.exe --version`
+  prints nothing on Windows, so `get_chrome_version()` returned
+  `None` and UC downloaded a driver one major ahead of the browser
+  (150 vs 149). Now read from the registry (`BLBeacon\version`).
+- Browser-opener quoting in `2-ABRIR-COTA.bat`.
+
+## [2.1.0] - 2026-06-12 — FIDC workflow + resilience
+
+### Added
+
+- **FIDC route**: scrapes _all_ subclasses of a FIDC CNPJ (the
+  regular flow clicks only the first search result) with the full
+  6-column periodic table (competência, PL, cota, aplicações,
+  resgates, cotistas). Long/tidy Excel output, one row per
+  subclasse × date. Optional per-CNPJ desired-subclass filter.
+- **Incremental save**: both scrape flows persist a
+  `results/*_partial.xlsx` after every CNPJ — a killed process or
+  Stop keeps everything scraped so far.
+- **Circuit breaker**: a permanently-dead driver aborts the run with
+  partial results instead of re-entering the recovery loop for every
+  remaining CNPJ.
+- **Optional upstream proxy** (Settings field / `proxy` ctor arg) —
+  Chrome `--proxy-server` for IP rotation on large batches.
+- History route persists and re-serves result Excels from `results/`
+  (regular + FIDC, partial runs tagged).
+- `requirements.lock` — uv hash-pinned lockfile.
+
 ## [2.0.0] - 2026-05-07 — "Cota" redesign
 
 ### Added
+
 - **Cota UI redesign** based on a Claude Design handoff bundle
   (warm-neutral surface + emerald accent, Geist Sans/Mono).
 - New `cota_theme.py` module: global CSS + HTML helpers for brand
@@ -41,6 +137,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `selenium-stealth==1.0.6` dependency.
 
 ### Changed
+
 - **Sidebar removed** — admin/diagnostic tools moved to the Settings
   route. The Cota topbar is the only navigation now.
 - `undetected-chromedriver==3.5.5` (was `>=3.5.5`).
@@ -55,20 +152,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (e.g. 148 vs 147).
 
 ### Removed
+
 - `--disable-features=VizDisplayCompositor,TranslateUI` Chrome flag
   — known to crash Chromium 120+ in containers.
 - `--js-flags=--max-old-space-size=256` — too restrictive, made
   Chrome refuse to start on JS-heavy sites.
 - `streamlit_utils.py`, `parse_bot_client.py`, `parse_bot_scraper.py`
   — orphaned modules with no callers.
-- One-off historical docs (BUGFIX_V1.0.1, RACE_CONDITION_FIX,
-  FINAL_STATUS, CLEANUP_*, ANTI_SPAM_*, STEALTH_MODE,
+- One-off historical docs (BUGFIX*V1.0.1, RACE_CONDITION_FIX,
+  FINAL_STATUS, CLEANUP*_, ANTI*SPAM*_, STEALTH_MODE,
   LOGGING_GUIDE, LOGIN_SETUP, LEIA-ME, COMO_TESTAR,
   CONCLUSAO_TESTES_PARALELOS, SUMARIO_EXECUTIVO,
   DOCUMENTATION_INDEX) moved to `docs/archive/`.
 - Test scripts (`test_*.py`) moved to `archive/test_files/`.
 
 ### Fixed
+
 - "Failed to initialize web driver" error message now surfaces the
   actual exception type, message, and traceback (previously hidden
   in logs).
@@ -85,16 +184,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.5] - 2026-01-28
 
 ### Fixed
+
 - **Critical**: ChromeDriver initialization error "unrecognized chrome option: excludeSwitches"
 - Compatibility issue with undetected-chromedriver on Streamlit Cloud
 - Removed experimental_option calls that conflict with undetected-chromedriver
 
 ### Changed
+
 - Simplified Chrome options for better compatibility
 - Let undetected-chromedriver handle automation hiding internally
 - Removed manual experimental_option settings
 
 ### Technical Note
+
 undetected-chromedriver manages automation hiding automatically.
 Manually setting experimental_options causes initialization failures
 on some Chrome/ChromeDriver versions. Removed to ensure compatibility.
@@ -102,11 +204,13 @@ on some Chrome/ChromeDriver versions. Removed to ensure compatibility.
 ## [1.0.4] - 2026-01-28
 
 ### Fixed
+
 - **Critical**: Enhanced anti-bot detection evasion for ANBIMA website
 - ChromeDriver being detected and killed by anti-bot systems
 - Repeated connection failures due to bot detection
 
 ### Added
+
 - Enhanced stealth measures to avoid automation detection:
   - Disable `AutomationControlled` blink feature
   - Exclude automation switches
@@ -117,6 +221,7 @@ on some Chrome/ChromeDriver versions. Removed to ensure compatibility.
 - Increased delays between actions (8-15 seconds vs 5-10 seconds)
 
 ### Changed
+
 - **Headless mode now defaults to FALSE** (OFF) in UI
 - Longer delays between actions to appear more human
 - More realistic browser fingerprint
@@ -124,6 +229,7 @@ on some Chrome/ChromeDriver versions. Removed to ensure compatibility.
 - Recommend non-headless mode for better success rate
 
 ### Why This Matters
+
 ANBIMA's anti-bot system was detecting and blocking the scraper,
 causing repeated ChromeDriver crashes. Enhanced stealth measures
 make the scraper appear more like a real human user.
@@ -134,6 +240,7 @@ results, run with headless mode disabled (visible browser window).
 ## [1.0.3] - 2026-01-28
 
 ### Fixed
+
 - **Critical**: ChromeDriver connection refused errors - "Max retries exceeded with url: /session/..."
 - **Critical**: Driver crashes causing entire batch to fail
 - Connection loss detection and automatic recovery mid-scraping
@@ -141,6 +248,7 @@ results, run with headless mode disabled (visible browser window).
 - Longer wait time (5s) before driver recovery for stability
 
 ### Added
+
 - `safe_driver_operation()` wrapper for automatic connection recovery
 - All driver operations now wrapped with connection error detection
 - Specific error detection for "connection refused" and "max retries exceeded"
@@ -148,12 +256,14 @@ results, run with headless mode disabled (visible browser window).
 - Verification that recovered driver is responsive before continuing
 
 ### Changed
+
 - Driver recovery now waits 5 seconds instead of 2 seconds
 - Multiple driver health checks before operations
 - Each scraping step (search, get name, navigate, extract) wrapped with recovery logic
 - Better error messages distinguish connection errors from other failures
 
 ### Technical Details
+
 - Detects: "connection refused", "max retries exceeded", "cannot call" errors
 - Auto-recovery: Up to 2 attempts per operation with driver reinitization
 - Health verification: Tests both `current_url` and `title` properties
@@ -162,6 +272,7 @@ results, run with headless mode disabled (visible browser window).
 ## [1.0.2] - 2026-01-28
 
 ### Added
+
 - **Comprehensive session logging** - Every scraping session now creates a detailed log file
 - **Downloadable log files** - Users can download session logs for troubleshooting
 - **Real-time log viewer** - View recent logs in sidebar (last 50 lines)
@@ -170,6 +281,7 @@ results, run with headless mode disabled (visible browser window).
 - **Session statistics** - Detailed summary logged at start and completion
 
 ### Logging Details
+
 - Log files saved to `session_logs/` directory
 - Filename format: `scraping_session_YYYYMMDD_HHMMSS.log`
 - Captures: file uploads, driver initialization, CNPJ progress, success/failures, errors, completion stats
@@ -178,6 +290,7 @@ results, run with headless mode disabled (visible browser window).
 - Log file size displayed in UI
 
 ### Why This Helps
+
 - Users without Streamlit admin access can now capture and share logs
 - Detailed diagnostics for "lost connection" and hanging issues
 - Complete audit trail of every scraping session
@@ -186,6 +299,7 @@ results, run with headless mode disabled (visible browser window).
 ## [1.0.1] - 2026-01-28
 
 ### Fixed
+
 - **Critical**: Scraper hanging at 83% progress - added per-CNPJ timeout protection (3 minutes max)
 - **Critical**: UI becoming unresponsive with white overlay - improved exception handling with try/catch per CNPJ
 - Individual CNPJ failures no longer stop entire scraping process
@@ -194,12 +308,14 @@ results, run with headless mode disabled (visible browser window).
 - Always close scraper properly even if errors occur (finally block)
 
 ### Added
+
 - Per-CNPJ timeout protection (MAX_CNPJ_TIMEOUT = 180 seconds)
 - Timeout checks at each scraping step (search, get name, navigate, extract)
 - Individual CNPJ exception handling to prevent cascade failures
 - Better progress tracking continues even when individual CNPJs fail
 
 ### Changed
+
 - Exception handling now wraps each CNPJ individually
 - Process results even if some CNPJs failed
 - Display warnings instead of errors for non-critical issues
@@ -207,6 +323,7 @@ results, run with headless mode disabled (visible browser window).
 ## [1.0.0] - 2026-01-27
 
 ### Added
+
 - Version control display in UI (sidebar and header)
 - Automatic driver recovery for background/sleep stability
 - Activity log with real-time updates
@@ -218,6 +335,7 @@ results, run with headless mode disabled (visible browser window).
 - Comprehensive security documentation
 
 ### Fixed
+
 - Activity log duplicates issue (using st.empty() placeholder)
 - Browser stopping when Chrome goes to background
 - Browser stopping during computer sleep
@@ -225,6 +343,7 @@ results, run with headless mode disabled (visible browser window).
 - Deprecation warnings for use_container_width parameter
 
 ### Security
+
 - Removed hardcoded API keys from codebase
 - Added environment variable support for secrets
 - Enhanced .gitignore for sensitive files
@@ -232,12 +351,14 @@ results, run with headless mode disabled (visible browser window).
 - Generated secure 32-character random password for authentication
 
 ### Changed
+
 - Chrome options optimized for background stability
 - Retry logic with exponential backoff
 - Driver kept alive in same process (use_subprocess=False)
 - Template download removed (users upload their own files)
 
 ### Technical
+
 - Python 3.11+ compatibility
 - pandas >= 2.2.0 for Python 3.13 support
 - undetected-chromedriver >= 3.5.5
