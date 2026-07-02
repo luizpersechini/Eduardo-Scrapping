@@ -60,11 +60,33 @@ def load_quotas(csv_path: Path, cnpjs: List[str]) -> pd.DataFrame:
     cnpj_set = {c.strip() for c in cnpjs}
     df = df[df[cols["cnpj"]].isin(cnpj_set)].copy()
     if df.empty:
-        logger.warning("None of the %d requested CNPJ(s) were found in %s", len(cnpj_set), csv_path)
+        logger.warning(
+            "None of the %d requested CNPJ(s) were found in %s", len(cnpj_set), csv_path
+        )
 
     df.rename(columns={cols[k]: v for k, v in _RENAME.items()}, inplace=True)
     df["Subclasse"] = df["Subclasse"].fillna("")
-    df = df.sort_values(["CNPJ", "Subclasse", "Data competência"]).reset_index(drop=True)
+    df = df.sort_values(["CNPJ", "Subclasse", "Data competência"]).reset_index(
+        drop=True
+    )
+
+    # Cosmetic: real dd/mm/yyyy date (CVM ships ISO strings) + numeric columns.
+    # CVM VL_QUOTA is already a plain decimal (dot separator), so a straight
+    # numeric coercion is all that's needed — no "R$" here.
+    from data_processor import to_date
+
+    df["Data competência"] = df["Data competência"].map(to_date)
+    for col in (
+        "Valor cota",
+        "Valor patrimônio líquido",
+        "Valor volume total de aplicação",
+        "Valor volume total de resgates",
+    ):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["Número total de cotistas"] = pd.to_numeric(
+        df["Número total de cotistas"], errors="coerce"
+    ).astype("Int64")
+
     return df[OUTPUT_COLUMNS]
 
 

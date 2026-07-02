@@ -1151,8 +1151,8 @@ if st.session_state.route == "fidc":
                 return
             try:
                 RESULTS_DIR.mkdir(exist_ok=True)
-                _fidc_persist_processor.process_fidc_data(results).to_excel(
-                    _fidc_partial_path, index=False
+                DataProcessor.write_excel(
+                    _fidc_persist_processor.process_fidc_data(results), _fidc_partial_path
                 )
                 st.session_state.fidc_last_excel_path = str(_fidc_partial_path)
             except Exception as e:
@@ -1313,7 +1313,7 @@ if st.session_state.route == "fidc":
                         interrupted = was_interrupted or st.session_state.fidc_stop
                         suffix = "_partial" if interrupted else ""
                         fidc_path = RESULTS_DIR / f"fidc_results_{_fidc_run_ts}{suffix}.xlsx"
-                        fidc_df.to_excel(fidc_path, index=False)
+                        DataProcessor.write_excel(fidc_df, fidc_path)
                         st.session_state.fidc_last_excel_path = str(fidc_path)
                         # Promote the partial to final on clean completion.
                         if (
@@ -1359,7 +1359,7 @@ if st.session_state.route == "fidc":
         fidc_filename = f"fidc_results_{ts}.xlsx"
 
         fidc_buffer = io.BytesIO()
-        fidc_df.to_excel(fidc_buffer, index=False)
+        DataProcessor.write_excel(fidc_df, fidc_buffer)
         fidc_buffer.seek(0)
 
         with st.container(border=True):
@@ -1498,7 +1498,7 @@ if st.session_state.route == "cvm":
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                 fname = f"cvm_quotas_{ts}.xlsx"
                 RESULTS_DIR.mkdir(exist_ok=True)
-                cvm_df.to_excel(RESULTS_DIR / fname, index=False)
+                DataProcessor.write_excel(cvm_df, RESULTS_DIR / fname)
 
                 st.session_state.cvm_results = cvm_df
                 st.session_state.cvm_missing = cvm_missing
@@ -1544,7 +1544,7 @@ if st.session_state.route == "cvm":
                 st.warning(f"Not found in CVM data: {', '.join(cvm_missing)}")
 
             cvm_buffer = io.BytesIO()
-            cvm_df.to_excel(cvm_buffer, index=False)
+            DataProcessor.write_excel(cvm_df, cvm_buffer)
             cvm_buffer.seek(0)
             st.download_button(
                 "⬇  Download Excel",
@@ -1870,7 +1870,7 @@ if st.session_state.phase == "scrape":
             return
         try:
             RESULTS_DIR.mkdir(exist_ok=True)
-            _persist_processor.process_scraped_data(results).to_excel(_partial_path, index=False)
+            DataProcessor.write_excel(_persist_processor.process_scraped_data(results), _partial_path)
             st.session_state.last_excel_path = str(_partial_path)
         except Exception as e:
             st.session_state.session_logger.warning(f"Incremental save failed: {e}")
@@ -2062,7 +2062,7 @@ if st.session_state.phase == "scrape":
                     interrupted = was_interrupted or st.session_state.stop_scraping
                     suffix = "_partial" if interrupted else ""
                     excel_path = RESULTS_DIR / f"anbima_results_{_run_ts}{suffix}.xlsx"
-                    output_df.to_excel(excel_path, index=False)
+                    DataProcessor.write_excel(output_df, excel_path)
                     st.session_state.last_excel_path = str(excel_path)
                     # On clean completion, drop the now-redundant partial file.
                     if not interrupted and _partial_path.exists() and _partial_path != excel_path:
@@ -2122,7 +2122,7 @@ if st.session_state.phase == "done" and st.session_state.results is not None:
 
     # ---- prepare Excel buffer once -----------------------------------------
     output_buffer = io.BytesIO()
-    st.session_state.results.to_excel(output_buffer, index=False)
+    DataProcessor.write_excel(st.session_state.results, output_buffer)
     output_buffer.seek(0)
 
     # ---- Card 1: Summary ---------------------------------------------------

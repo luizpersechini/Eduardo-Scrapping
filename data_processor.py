@@ -12,6 +12,52 @@ import os
 import config
 
 
+# ── Output cleaning helpers (shared with cvm_processor) ────────────────────
+# Eduardo's cosmetic requests for the Excel output:
+#   1. dates as real dd/mm/yyyy dates (so Excel doesn't need "Text to Columns")
+#   2. drop the "R$ " prefix and leave the quota as a plain number
+
+_EMPTY = ("", "-", "—", "n/a", "nan", "none")
+
+
+def brl_to_number(value):
+    """'R$ 1.234,56' → 1234.56, '439,648005' → 439.648005, blank/'-' → None.
+
+    Handles Brazilian formatting ('.' thousands, ',' decimal) and strips the
+    'R$' currency prefix. Returns the original value untouched if it can't be
+    parsed, so unexpected text is never silently lost.
+    """
+    if value is None or isinstance(value, (int, float)):
+        return value
+    t = str(value).replace("R$", "").replace("\xa0", " ").strip()
+    if t.lower() in _EMPTY:
+        return None
+    cleaned = t.replace(".", "").replace(",", ".")
+    try:
+        return float(cleaned)
+    except ValueError:
+        return value
+
+
+def to_date(value):
+    """Parse 'dd/mm/yyyy' (or dd/mm/yy, or ISO yyyy-mm-dd) to a datetime so the
+    Excel cell is a real date. Returns the original value if unparseable."""
+    if value is None or isinstance(value, datetime):
+        return value
+    s = str(value).strip()
+    if not s or s.lower() in _EMPTY:
+        return value
+    for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    try:
+        return pd.to_datetime(s, dayfirst=True).to_pydatetime()
+    except Exception:
+        return value
+
+
 class DataProcessor:
     """Handles reading input Excel and writing output Excel"""
 
@@ -114,9 +160,11 @@ class DataProcessor:
                         )
                         all_data.append(
                             {
-                                "Data da cotização": date_value,
+                                # real date (chronological sort + no "Text to
+                                # Columns" in Excel) and a plain number (no "R$ ")
+                                "Data da cotização": to_date(date_value),
                                 "CNPJ": cnpj,
-                                "Valor cota": cota_value,
+                                "Valor cota": brl_to_number(cota_value),
                             }
                         )
 
@@ -233,6 +281,25 @@ class DataProcessor:
                 return pd.DataFrame(columns=columns)
 
             df = pd.DataFrame(rows, columns=columns)
+
+            # Cosmetic cleanup: real date + plain numbers (no "R$ ").
+            if not df.empty:
+                df["Data competência"] = df["Data competência"].map(to_date)
+                for col in (
+                    "Valor patrimônio líquido",
+                    "Valor cota",
+                    "Valor volume total de aplicação",
+                    "Valor volume total de resgates",
+                ):
+                    df[col] = df[col].map(brl_to_number)
+                # Number of shareholders → integer
+                df["Número total de cotistas"] = pd.to_numeric(
+                    df["Número total de cotistas"]
+                    .astype(str)
+                    .str.replace(r"[.\s\xa0]", "", regex=True),
+                    errors="coerce",
+                ).astype("Int64")
+
             self.logger.info(
                 f"Processed FIDC data: {len(df)} rows across "
                 f"{df['Código'].nunique()} subclass(es)"
@@ -242,6 +309,30 @@ class DataProcessor:
         except Exception as e:
             self.logger.error(f"Error processing FIDC data: {str(e)}")
             raise
+
+    @staticmethod
+    def write_excel(df: pd.DataFrame, target) -> None:
+        """Write `df` to Excel (a path or a file-like buffer) forcing dd/mm/yyyy
+        display for real date cells. Use this everywhere instead of df.to_excel
+        so every output — regular, FIDC, CVM — shows dates the Brazilian way.
+
+        The `datetime_format` writer option only styles pure datetime columns.
+        The regular-scrape pivot keeps its date column as `object` dtype (string
+        header rows sit above the dates), so pandas skips it and openpyxl falls
+        back to an ISO format. To cover every shape, we also walk the written
+        cells and stamp DD/MM/YYYY on any that hold a real date/datetime."""
+        with pd.ExcelWriter(
+            target,
+            engine="openpyxl",
+            datetime_format="DD/MM/YYYY",
+            date_format="DD/MM/YYYY",
+        ) as writer:
+            df.to_excel(writer, index=False)
+            for ws in writer.book.worksheets:
+                for row in ws.iter_rows():
+                    for cell in row:
+                        if isinstance(cell.value, datetime):
+                            cell.number_format = "DD/MM/YYYY"
 
     def save_results(self, df: pd.DataFrame, output_file: str):
         """
@@ -259,8 +350,7 @@ class DataProcessor:
             if output_dir and not os.path.exists(output_dir):
                 os.makedirs(output_dir)
 
-            # Save to Excel
-            df.to_excel(output_file, index=False, engine="openpyxl")
+            self.write_excel(df, output_file)
 
             self.logger.info(f"Successfully saved {len(df)} rows to {output_file}")
 
