@@ -69,12 +69,8 @@ MAX_CNPJ_TIMEOUT = 90  # was 180 — a healthy CNPJ finishes in ~45–90s
 
 # Stealth mode settings
 STEALTH_MODE = True  # Enabled by default for anti-spam compliance
-STEALTH_MIN_DELAY = (
-    8.0  # Minimum delay between actions (seconds) - increased for anti-bot
-)
-STEALTH_MAX_DELAY = (
-    15.0  # Maximum delay between actions (seconds) - increased for anti-bot
-)
+STEALTH_MIN_DELAY = 8.0  # Minimum delay between actions (seconds) - increased for anti-bot
+STEALTH_MAX_DELAY = 15.0  # Maximum delay between actions (seconds) - increased for anti-bot
 STEALTH_MOUSE_MOVEMENTS = True  # Simulate mouse movements
 RECOMMEND_NON_HEADLESS = True  # Headless mode more likely to be detected
 
@@ -85,7 +81,25 @@ import os
 PARSE_BOT_API_KEY = os.getenv("PARSE_BOT_API_KEY", "")  # Set in Streamlit Cloud secrets
 PARSE_BOT_API_URL = "https://api.parse.bot"
 # NOTE: The value below must be the SCRAPER ID (from the dashboard URL), NOT the API Key.
-PARSE_BOT_SCRAPER_ID = os.getenv(
-    "PARSE_BOT_SCRAPER_ID", ""
-)  # Set in Streamlit Cloud secrets
+PARSE_BOT_SCRAPER_ID = os.getenv("PARSE_BOT_SCRAPER_ID", "")  # Set in Streamlit Cloud secrets
 USE_PARSE_BOT = False  # Disabled by default (not used in Streamlit app)
+
+# CVM open data (https://dados.cvm.gov.br) — daily fund quota files.
+# Bulk, government-published, no scraping/anti-bot needed. One zip per month,
+# covering every registered fund's daily NAV/quota for that month.
+CVM_BASE_URL = "https://dados.cvm.gov.br/dados/FI/DOC/INF_DIARIO/DADOS"
+CVM_FILENAME_PATTERN = "inf_diario_fi_{yyyymm}.zip"
+CVM_CACHE_DIR = "cvm_cache"
+
+# Column names in the raw inf_diario_fi CSV (";"-delimited, "." decimal,
+# ISO dates). VL_QUOTA arrives as a normal decimal already — no rescaling.
+CVM_COLUMNS = {
+    "cnpj": "CNPJ_FUNDO_CLASSE",
+    "subclasse": "ID_SUBCLASSE",
+    "date": "DT_COMPTC",
+    "quota": "VL_QUOTA",
+    "patrim_liq": "VL_PATRIM_LIQ",
+    "captc_dia": "CAPTC_DIA",
+    "resg_dia": "RESG_DIA",
+    "nr_cotst": "NR_COTST",
+}
