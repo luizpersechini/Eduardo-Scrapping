@@ -14,7 +14,7 @@ echo.
 
 REM  Branch publicada que o Eduardo usa. Se um dia mudar, e so
 REM  trocar esta linha (e a pasta em SRC, mais abaixo).
-set "BRANCH=feature/cvm-quota-ingest"
+set "BRANCH=main"
 set "ZIPURL=https://github.com/luizpersechini/Eduardo-Scrapping/archive/refs/heads/%BRANCH%.zip"
 set "TMP=%TEMP%\cota_update"
 set "ZIP=%TEMP%\cota_update.zip"
@@ -44,8 +44,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM  O GitHub troca a barra "/" da branch por "-" no nome da pasta.
-set "SRC=%TMP%\Eduardo-Scrapping-feature-cvm-quota-ingest"
+REM  O GitHub nomeia a pasta extraida como Eduardo-Scrapping-<branch>.
+set "SRC=%TMP%\Eduardo-Scrapping-main"
 if not exist "%SRC%" (
     echo.
     echo [ERRO] O conteudo da atualizacao nao veio como esperado.
