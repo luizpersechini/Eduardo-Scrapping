@@ -12,6 +12,20 @@ echo  Seus dados, seus resultados e sua senha NAO serao mexidos.
 echo  Isso leva menos de um minuto. Aguarde.
 echo.
 
+REM  Se o Cota estiver aberto, o Python continua com os arquivos antigos
+REM  na memoria e a atualizacao fica "pela metade" ate reiniciar.
+REM  Melhor bloquear aqui e pedir para fechar primeiro.
+powershell -NoProfile -Command "if (Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue) { exit 1 } else { exit 0 }"
+if errorlevel 1 (
+    echo [ATENCAO] O programa Cota esta ABERTO agora.
+    echo.
+    echo  Feche a janela preta do Cota primeiro e depois
+    echo  clique no 3-ATUALIZAR de novo.
+    echo.
+    pause
+    exit /b 1
+)
+
 REM  Branch publicada que o Eduardo usa. Se um dia mudar, e so
 REM  trocar esta linha (e a pasta em SRC, mais abaixo).
 set "BRANCH=main"
@@ -69,6 +83,10 @@ if errorlevel 8 (
     pause
     exit /b 1
 )
+
+REM  Limpar codigo compilado antigo para o Python nao reaproveitar nada.
+if exist "__pycache__" rmdir /s /q "__pycache__"
+if exist "tests\__pycache__" rmdir /s /q "tests\__pycache__"
 
 REM  Garantir que qualquer componente novo seja instalado (rapido se
 REM  nao mudou nada). So roda se o ambiente ja existir.

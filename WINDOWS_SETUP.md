@@ -79,5 +79,10 @@ powershell -Command "iwr 'https://raw.githubusercontent.com/luizpersechini/Eduar
   driver/browser mismatches (e.g. driver 150 vs Chrome 149) shouldn't
   recur; if one does, delete `%APPDATA%\undetected_chromedriver` and
   relaunch.
+- **`type object 'DataProcessor' has no attribute ...` right after an
+  update** — the update ran while the app was open, so the running
+  Python kept old modules in memory. Close the black window and reopen
+  `2-ABRIR-COTA`. The updater now refuses to run while the app is open
+  (checks port 8501) so this shouldn't recur.
 - **Slow / stuck run** — close the black window and reopen; partial results
   are saved and downloadable from the **History** tab.
