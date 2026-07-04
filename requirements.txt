@@ -2,7 +2,7 @@ selenium==4.15.2
 pandas>=2.2.0
 openpyxl>=3.1.5
 webdriver-manager==4.0.1
-tqdm==4.66.1
+tqdm==4.66.3
 setuptools
 undetected-chromedriver==3.5.5
 selenium-stealth==1.0.6
