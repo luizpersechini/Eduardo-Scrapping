@@ -1,7 +1,19 @@
 @echo off
 setlocal enabledelayedexpansion
 title Cota - Atualizar
-cd /d "%~dp0"
+
+REM  A atualizacao sobrescreve este proprio arquivo. Um .bat que muda
+REM  enquanto roda faz o cmd executar lixo (ele le o arquivo por posicao
+REM  de byte, nao guarda uma copia). Entao: na primeira passada, copiamos
+REM  este arquivo para a pasta temporaria e rodamos a copia de la,
+REM  passando a pasta do programa como argumento.
+if /i "%~1"=="RUN_FROM_TEMP" goto :run
+copy /y "%~f0" "%TEMP%\cota_atualizar_run.bat" >nul
+"%TEMP%\cota_atualizar_run.bat" RUN_FROM_TEMP "%~dp0"
+exit /b
+
+:run
+cd /d "%~2"
 
 echo ============================================================
 echo    COTA - Atualizar para a versao mais recente

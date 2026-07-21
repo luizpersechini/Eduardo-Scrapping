@@ -84,5 +84,13 @@ powershell -Command "iwr 'https://raw.githubusercontent.com/luizpersechini/Eduar
   Python kept old modules in memory. Close the black window and reopen
   `2-ABRIR-COTA`. The updater now refuses to run while the app is open
   (checks port 8501) so this shouldn't recur.
+- **Garbage like `'" (' não é reconhecido...` at the end of an update** —
+  the updater overwrote _itself_ mid-run (cmd reads batch files by byte
+  offset, so a changed `3-ATUALIZAR.bat` derails after the copy step).
+  The files DID update; the run only derailed after the copy. Since
+  v2.4.x the updater relaunches itself from `%TEMP%` so it never
+  overwrites a running copy; updating _from_ an older updater can show
+  this error one last time — ignore it, or re-bootstrap the bat with
+  the `iwr` one-liner above.
 - **Slow / stuck run** — close the black window and reopen; partial results
   are saved and downloadable from the **History** tab.
