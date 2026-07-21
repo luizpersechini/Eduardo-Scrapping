@@ -134,12 +134,14 @@ Use the **CVM route** instead — it downloads the official
 `inf_diario_fi` monthly CSV from dados.cvm.gov.br and filters it to your
 CNPJs. No browser, no anti-bot exposure. Caveats:
 
-- Monthly granularity of publication (current month is incomplete; the
-  app defaults to the second-to-last published month).
+- The app defaults to the latest published month; CVM appends to it
+  daily, so it holds data up to roughly yesterday.
 - CNPJs must match CVM's registry exactly — the run report lists
   requested CNPJs that matched no rows.
-- First run per month downloads a large zip into `cvm_cache/`;
-  subsequent runs reuse the cache.
+- First run per month downloads a large zip into `cvm_cache/`. Old
+  months are cached forever; the current and previous months are
+  re-downloaded once per day so the data never freezes at the day it
+  was first fetched.
 
 ---
 

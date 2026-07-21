@@ -6,7 +6,7 @@ Covers:
     why the raw file needs no /1e12 normalization)
   - cvm_processor.missing_cnpjs
   - cvm_downloader.resolve_month: explicit month, validation, and the
-    default-to-second-to-last logic (network call swapped out, no live
+    default-to-latest logic and cache freshness (network call swapped out, no live
     request needed)
 
 Run:  python tests/cvm_ingest_test.py   (exits non-zero on failure)
@@ -79,20 +79,46 @@ def test_resolve_month_explicit_and_validation():
         pass
 
 
-def test_resolve_month_defaults_to_second_to_last():
+def test_resolve_month_defaults_to_latest():
     original = cvm_downloader.list_available_months
     cvm_downloader.list_available_months = lambda: ["202604", "202605", "202606"]
     try:
-        assert cvm_downloader.resolve_month(None) == "202605"
+        assert cvm_downloader.resolve_month(None) == "202606"
     finally:
         cvm_downloader.list_available_months = original
+
+
+def test_cache_freshness():
+    from datetime import date
+    import os
+    import tempfile
+    from pathlib import Path
+
+    today = date.today()
+    current = today.year * 100 + today.month
+    previous = current - 1 if current % 100 > 1 else (current // 100 - 1) * 100 + 12
+    old_month = str(previous - 100)  # a year ago — immutable on CVM's side
+
+    with tempfile.TemporaryDirectory() as tmp:
+        zp = Path(tmp) / "x.zip"
+        zp.write_bytes(b"z")
+        # downloaded today → fresh for any month
+        assert cvm_downloader._cache_is_fresh(zp, str(current))
+        assert cvm_downloader._cache_is_fresh(zp, old_month)
+        # downloaded 3 days ago → stale for current/previous, fine for old
+        stale = zp.stat().st_mtime - 3 * 86400
+        os.utime(zp, (stale, stale))
+        assert not cvm_downloader._cache_is_fresh(zp, str(current))
+        assert not cvm_downloader._cache_is_fresh(zp, str(previous))
+        assert cvm_downloader._cache_is_fresh(zp, old_month)
 
 
 def main():
     test_load_quotas_filters_and_disambiguates_subclasses()
     test_missing_cnpjs()
     test_resolve_month_explicit_and_validation()
-    test_resolve_month_defaults_to_second_to_last()
+    test_resolve_month_defaults_to_latest()
+    test_cache_freshness()
     print("cvm ingest smoke tests OK")
 
 

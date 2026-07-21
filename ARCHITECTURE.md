@@ -182,9 +182,10 @@ quotas as a monthly CSV (`inf_diario_fi_YYYYMM.zip`) on
 dados.cvm.gov.br — no scraping, no anti-bot risk.
 
 - `cvm_downloader` — lists available months, resolves the target month
-  (default: second-to-last published, since the current month is
-  incomplete), downloads the zip (write-then-rename, cached in
-  `cvm_cache/`), extracts the CSV.
+  (default: latest published — CVM appends to it daily), downloads the
+  zip (write-then-rename, cached in `cvm_cache/`; current and previous
+  months are re-downloaded once per day, older months cached forever),
+  extracts the CSV (overwriting a stale extract).
 - `cvm_processor.load_quotas(csv, cnpjs)` — reads only the needed
   columns, filters to the requested CNPJs, keeps `ID_SUBCLASSE` as a
   disambiguator, coerces dates/numbers, and returns the same tidy

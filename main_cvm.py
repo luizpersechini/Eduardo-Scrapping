@@ -52,7 +52,7 @@ def main(
     Args:
         input_file: Path to input Excel file with CNPJs
         output_file: Path to output Excel file (auto-generated if None)
-        month: Target month as YYYYMM (default: second-to-last published)
+        month: Target month as YYYYMM (default: latest published)
     """
     logger = setup_logging()
     processor = DataProcessor()
@@ -130,7 +130,7 @@ if __name__ == "__main__":
         "-m",
         "--month",
         default=None,
-        help="Target month as YYYYMM (default: second-to-last published month)",
+        help="Target month as YYYYMM (default: latest published month)",
     )
 
     args = parser.parse_args()
