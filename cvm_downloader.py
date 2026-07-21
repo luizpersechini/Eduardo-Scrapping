@@ -84,11 +84,13 @@ def download_month(month: str) -> Path:
     except URLError as e:
         raise RuntimeError(f"Failed to download {url}: {e}") from e
 
-    # Write-then-rename so a crash mid-download can't leave a truncated file
-    # that a later run mistakes for a valid cache hit.
+    # Write-then-replace so a crash mid-download can't leave a truncated file
+    # that a later run mistakes for a valid cache hit. replace() (not rename())
+    # because the daily refresh overwrites an existing zip, and on Windows
+    # rename() refuses to clobber (WinError 183).
     tmp = dest.with_suffix(".zip.part")
     tmp.write_bytes(data)
-    tmp.rename(dest)
+    tmp.replace(dest)
     logger.info("Saved %s (%d bytes)", dest, len(data))
     return dest
 
