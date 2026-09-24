@@ -9,6 +9,7 @@ import random
 import logging
 import subprocess
 import re
+from urllib.parse import quote
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
@@ -724,9 +725,112 @@ class StealthANBIMAScraper:
                 f"Human behavior simulation error (non-critical): {str(e)}"
             )
 
+    @staticmethod
+    def _cnpj_digits(text: str) -> str:
+        """'35.726.300/0001-37' -> '35726300000137' (for format-proof matching)."""
+        return re.sub(r"\D", "", text or "")
+
+    def _open_search_results(self, cnpj: str):
+        """
+        Open the ANBIMA results page for `cnpj` and return its result cards.
+
+        Goes straight to /busca/fundos?q=<cnpj> instead of loading the (heavy,
+        all-funds) base page, typing, and waiting for the autocomplete dropdown
+        — that chain was the source of intermittent "N/A / no data" on funds
+        that do exist. Then it WAITS for a card whose text carries the CNPJ
+        (the SPA renders async; a fixed sleep raced it), so we never pick a
+        card from the unfiltered listing and scrape the wrong fund.
+
+        Returns:
+            (matching, all_anchors, message)
+            matching    — result anchors whose card mentions `cnpj`
+            all_anchors — every result anchor rendered (for callers that need
+                          a fallback when cards don't print the CNPJ)
+        """
+        url = f"{config.ANBIMA_BASE_URL}?q={quote(cnpj, safe='')}"
+        selector = "article a[href*='/fundos/']"
+        want = self._cnpj_digits(cnpj)
+
+        def _card_text(anchor) -> str:
+            try:
+                return anchor.find_element(By.XPATH, "./ancestor::article[1]").text or ""
+            except Exception:
+                return anchor.text or ""
+
+        state = {}
+
+        def _matching(_driver):
+            found = [
+                a
+                for a in _driver.find_elements(By.CSS_SELECTOR, selector)
+                if want and want in self._cnpj_digits(_card_text(a))
+            ]
+            if found:
+                return found
+            # ANBIMA prints "Nenhum Fundo encontrado" for an unknown CNPJ. Only
+            # trust it once it has stayed on screen for a few seconds, so a
+            # transient loading state can't cut a real fund short.
+            if _driver.find_elements(
+                By.XPATH, "//*[contains(text(), 'Nenhum Fundo encontrado')]"
+            ):
+                state.setdefault("empty_since", time.time())
+                if time.time() - state["empty_since"] >= 5:
+                    return "empty"
+            else:
+                state.pop("empty_since", None)
+            return False
+
+        for attempt in (1, 2):
+            self.logger.info(f"Opening search results for {cnpj} (attempt {attempt})")
+            self.driver.get(url)
+            self.human_delay(2, 4)
+
+            if getattr(config, "STEALTH_MOUSE_MOVEMENTS", True):
+                self.simulate_human_behavior()
+
+            # Close cookies banner if present
+            try:
+                self.driver.find_element(By.LINK_TEXT, "Prosseguir").click()
+                self.human_delay(0.5, 1)
+            except Exception:
+                pass
+
+            try:
+                matching = WebDriverWait(
+                    self.driver, config.ELEMENT_WAIT_TIMEOUT
+                ).until(_matching)
+                if matching == "empty":
+                    self.logger.info(f"ANBIMA reports no fund for {cnpj}")
+                    return [], [], f"No results found for CNPJ: {cnpj} (ANBIMA: Nenhum Fundo encontrado)"
+                all_anchors = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                return matching, all_anchors, f"{len(matching)} result(s) match CNPJ"
+            except TimeoutException:
+                all_anchors = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                if all_anchors:
+                    # The site answered, just not with this CNPJ: don't reload,
+                    # report what it showed so the mismatch is diagnosable.
+                    seen = [
+                        _card_text(a).strip().split("\n")[0][:60] for a in all_anchors[:3]
+                    ]
+                    self.logger.warning(
+                        f"Results for {cnpj} don't mention that CNPJ. First cards: {seen}"
+                    )
+                    return [], all_anchors, (
+                        f"Results don't match CNPJ {cnpj} (got: {'; '.join(seen)})"
+                    )
+                self.logger.warning(
+                    f"No result cards rendered for {cnpj} (attempt {attempt})"
+                )
+                # Nothing rendered at all: reload once before giving up.
+
+        return [], [], f"No results found for CNPJ: {cnpj}"
+
     def search_fund(self, cnpj: str) -> Tuple[bool, str]:
         """
-        Search for a fund by CNPJ with human-like behavior
+        Search for a fund by CNPJ and open its detail page.
+
+        Only clicks a result whose card carries the requested CNPJ; if the
+        results don't match, it fails loudly rather than scrape a lookalike.
 
         Args:
             cnpj: The CNPJ to search for
@@ -735,97 +839,29 @@ class StealthANBIMAScraper:
             Tuple of (success: bool, message: str)
         """
         try:
-            # Navigate to ANBIMA page
-            self.logger.info(f"Navigating to {config.ANBIMA_BASE_URL}")
-            self.driver.get(config.ANBIMA_BASE_URL)
+            matching, _all, message = self._open_search_results(cnpj)
+            if not matching:
+                return False, message
 
-            # Human delay after page load
-            self.human_delay(3, 5)
-
-            # Simulate human behavior
-            if getattr(config, "STEALTH_MOUSE_MOVEMENTS", True):
-                self.simulate_human_behavior()
-
-            # Close cookies banner if present
-            try:
-                cookie_button = self.driver.find_element(By.LINK_TEXT, "Prosseguir")
-                cookie_button.click()
-                self.human_delay(1, 2)
-            except:
-                pass
-
-            # Find and fill search input
-            self.logger.info(f"Searching for CNPJ: {cnpj}")
-            search_input = self.wait.until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, "input[placeholder*='Busque fundos']")
-                )
+            # Prefer a classe link (/fundos/C...), which is what the periodic
+            # data navigation expects; fall back to whatever matched.
+            fund_link = next(
+                (a for a in matching if "/fundos/C" in (a.get_attribute("href") or "")),
+                matching[0],
+            )
+            self.logger.info(
+                f"Found {len(matching)} result(s) matching {cnpj}. Clicking the first one..."
             )
 
-            # Simulate human typing (delay between keystrokes)
-            search_input.clear()
-            for char in cnpj:
-                search_input.send_keys(char)
-                time.sleep(random.uniform(0.05, 0.15))  # Typing delay
+            # Move mouse and click
+            if getattr(config, "STEALTH_MOUSE_MOVEMENTS", True):
+                ActionChains(self.driver).move_to_element(fund_link).perform()
+                time.sleep(random.uniform(0.3, 0.8))
 
-            self.human_delay(2, 4)  # Wait before looking for dropdown
+            fund_link.click()
+            self.human_delay(2, 4)
 
-            # Try to click on the dropdown result link
-            self.logger.info("Looking for fund in dropdown results...")
-
-            try:
-                dropdown_link = self.wait.until(
-                    EC.element_to_be_clickable(
-                        (By.XPATH, "//a[contains(@href, '/busca/fundos?q=')]")
-                    )
-                )
-
-                # Simulate mouse move before click
-                if getattr(config, "STEALTH_MOUSE_MOVEMENTS", True):
-                    ActionChains(self.driver).move_to_element(dropdown_link).perform()
-                    time.sleep(random.uniform(0.3, 0.8))
-
-                dropdown_link.click()
-                self.human_delay(2, 3)
-
-                # Now we should be on the search results page
-                self.logger.info("Waiting for search results...")
-                self.human_delay(2, 3)
-
-                # Try to close dropdown if it's still open
-                try:
-                    close_button = self.driver.find_element(
-                        By.CSS_SELECTOR, "button[aria-label='close-dropdown']"
-                    )
-                    close_button.click()
-                    self.human_delay(0.5, 1)
-                except:
-                    pass
-
-                # Now find and click the fund link in the results
-                fund_links = self.driver.find_elements(
-                    By.CSS_SELECTOR, "article a[href*='/fundos/C']"
-                )
-
-                if not fund_links:
-                    return False, "No fund found for this CNPJ"
-
-                self.logger.info(
-                    f"Found {len(fund_links)} result(s). Clicking on the first one..."
-                )
-
-                # Move mouse and click
-                if getattr(config, "STEALTH_MOUSE_MOVEMENTS", True):
-                    ActionChains(self.driver).move_to_element(fund_links[0]).perform()
-                    time.sleep(random.uniform(0.3, 0.8))
-
-                fund_links[0].click()
-                self.human_delay(2, 4)
-
-                return True, "Fund found and clicked"
-
-            except TimeoutException:
-                return False, f"No results found for CNPJ: {cnpj}"
+            return True, "Fund found and clicked"
 
         except TimeoutException as e:
             self.logger.error(f"Timeout while searching for CNPJ {cnpj}: {str(e)}")
@@ -1292,75 +1328,21 @@ class StealthANBIMAScraper:
             where each subclass dict is {"name": str, "href": str, "code": str}.
         """
         try:
-            # --- mirror search_fund up to the results page --------------------
-            self.logger.info(f"[FIDC] Navigating to {config.ANBIMA_BASE_URL}")
-            self.driver.get(config.ANBIMA_BASE_URL)
-            self.human_delay(3, 5)
-
-            if getattr(config, "STEALTH_MOUSE_MOVEMENTS", True):
-                self.simulate_human_behavior()
-
-            # Close cookies banner if present
-            try:
-                cookie_button = self.driver.find_element(By.LINK_TEXT, "Prosseguir")
-                cookie_button.click()
-                self.human_delay(1, 2)
-            except Exception:
-                pass
-
-            # Find + fill the search input (human-like typing)
+            # --- results page (direct URL + wait for the CNPJ's cards) --------
             self.logger.info(f"[FIDC] Searching for CNPJ: {cnpj}")
-            search_input = self.wait.until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, "input[placeholder*='Busque fundos']")
+            matching, all_anchors, message = self._open_search_results(cnpj)
+            if matching:
+                anchors = matching
+            elif all_anchors:
+                # Subclass cards may not print the fund CNPJ; keep the old
+                # behaviour (take what the results page shows) but say so.
+                self.logger.warning(
+                    f"[FIDC] No card mentions {cnpj}; using all "
+                    f"{len(all_anchors)} result(s) as before"
                 )
-            )
-            search_input.clear()
-            for char in cnpj:
-                search_input.send_keys(char)
-                time.sleep(random.uniform(0.05, 0.15))
-
-            self.human_delay(2, 4)
-
-            # Click the dropdown result to land on the search-results page
-            try:
-                dropdown_link = self.wait.until(
-                    EC.element_to_be_clickable(
-                        (By.XPATH, "//a[contains(@href, '/busca/fundos?q=')]")
-                    )
-                )
-                if getattr(config, "STEALTH_MOUSE_MOVEMENTS", True):
-                    ActionChains(self.driver).move_to_element(dropdown_link).perform()
-                    time.sleep(random.uniform(0.3, 0.8))
-                dropdown_link.click()
-                self.human_delay(2, 3)
-            except TimeoutException:
-                return False, [], f"No results found for CNPJ: {cnpj}"
-
-            # Close the dropdown if it lingers
-            try:
-                close_button = self.driver.find_element(
-                    By.CSS_SELECTOR, "button[aria-label='close-dropdown']"
-                )
-                close_button.click()
-                self.human_delay(0.5, 1)
-            except Exception:
-                pass
-
-            self.human_delay(2, 3)
-
-            # --- collect ALL result anchors (not just the first) --------------
-            # Use a broad selector; FIDC subclass codes are numeric and the link
-            # format isn't fully knowable from the demo video, so we read real
-            # hrefs rather than constructing them.
-            anchors = self.driver.find_elements(
-                By.CSS_SELECTOR, "article a[href*='/fundos/']"
-            )
-            if not anchors:
-                # Fallback: any anchor pointing at a fund detail page
-                anchors = self.driver.find_elements(
-                    By.CSS_SELECTOR, "a[href*='/fundos/']"
-                )
+                anchors = all_anchors
+            else:
+                return False, [], message
 
             subclasses = []
             seen_hrefs = set()

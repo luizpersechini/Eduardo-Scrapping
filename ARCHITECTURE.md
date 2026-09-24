@@ -137,11 +137,18 @@ calls `close()` and then `setup_driver()` again.
 `pkill -9 -f chromedriver|chrome|chromium` to make sure no zombie
 process stays around to eat into the Streamlit Cloud RAM ceiling.
 
+Fund lookup (`_open_search_results`, shared by both flows) goes straight
+to `/busca/fundos?q=<cnpj>` and waits for a result card whose text
+carries that CNPJ — no typing, no autocomplete dropdown, no fixed
+sleeps. Only a matching card is ever clicked, so a slow render can't
+turn into a false "not found" or a lookalike fund; ANBIMA's "Nenhum
+Fundo encontrado" is used to fail fast on unknown CNPJs.
+
 FIDC support lives in three additional methods on the same class:
 
-- `search_fidc_subclasses(cnpj)` — like `search_fund` up to the results
-  page, but collects **all** result anchors instead of clicking the
-  first one (a FIDC CNPJ can map to several subclasses).
+- `search_fidc_subclasses(cnpj)` — same results-page step as
+  `search_fund`, but collects **all** matching result anchors instead of
+  clicking the first one (a FIDC CNPJ can map to several subclasses).
 - `extract_fidc_periodic_data()` — generalised table reader that
   keyword-matches all 6 FIDC columns (competência, PL, cota,
   aplicações, resgates, cotistas).

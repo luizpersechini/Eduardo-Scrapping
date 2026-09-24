@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-09-23 — Robust fund search (no more phantom "N/A")
+
+### Fixed
+- **Existing funds intermittently returned "N/A / no data".** The search
+  loaded the heavy all-funds base page, typed the CNPJ, waited up to 40s
+  for the autocomplete dropdown, then read the results after a fixed
+  sleep. Any slow step (page load, autocomplete, SPA render) turned into
+  a false "not found" — and the fixed sleep could even pick a card from
+  the unfiltered listing, i.e. scrape the wrong fund with a plausible
+  name. `search_fund` and `search_fidc_subclasses` now open
+  `/busca/fundos?q=<cnpj>` directly, WAIT for a result card whose text
+  carries the requested CNPJ, and refuse to click anything else. An
+  unknown CNPJ is detected from ANBIMA's "Nenhum Fundo encontrado" and
+  fails fast; a page that renders nothing is reloaded once. Per-CNPJ
+  time dropped from ~66–206s to ~45–60s in a live check.
+
 ## [2.4.0] - 2026-07-02 — Excel formatting + one-click updater
 
 ### Added
