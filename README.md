@@ -86,7 +86,7 @@ much less likely to trip ANBIMA's anti-bot detection.
 Three batch files, made for a non-technical user:
 
 - [`1-INSTALAR.bat`](./1-INSTALAR.bat) — one-time install (finds Python
-  - Chrome, creates `venv\`, installs deps).
+  and Chrome, creates `venv\`, installs deps).
 - [`2-ABRIR-COTA.bat`](./2-ABRIR-COTA.bat) — starts the app (no login
   locally via `COTA_NO_LOGIN=1`).
 - [`3-ATUALIZAR.bat`](./3-ATUALIZAR.bat) — one-click update: downloads
