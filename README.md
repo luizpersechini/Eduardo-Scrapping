@@ -26,6 +26,10 @@ with a plain-Selenium fallback.
     [dados.cvm.gov.br](https://dados.cvm.gov.br) and filters it to the
     uploaded CNPJs. Immune to anti-bot blocks; cached per month in
     `cvm_cache/`.
+- **CNPJ-verified lookup** — the scraper opens the ANBIMA results page
+  for the CNPJ directly and only clicks a result whose card carries that
+  CNPJ; it never scrapes a lookalike, and a slow page can't turn into a
+  false "not found".
 - **Live progress** during a run: SVG ring, six KPI tiles, thin emerald
   progress bar, shimmering "Fetching…" row in the activity feed,
   per-CNPJ success/failed history.

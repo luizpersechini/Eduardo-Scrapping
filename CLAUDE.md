@@ -40,7 +40,7 @@ CI: `.github/workflows/windows-smoke.yml` runs all three test files + a headless
 
 ## Dangerous — propose plan before touching
 
-- `stealth_scraper.py` — anti-bot config; wrong changes get IP banned
+- `stealth_scraper.py` — anti-bot config; wrong changes get IP banned. Fund lookup is `_open_search_results` (direct `?q=<cnpj>` URL + wait for a card that carries the CNPJ); keep the CNPJ check — it is what stops scraping a lookalike fund
 - `main_parallel.py` — parallel mode stresses rate limits hard
 - Credentials in `EDUARDO_CREDENTIALS.txt` — never log, print, or commit
 

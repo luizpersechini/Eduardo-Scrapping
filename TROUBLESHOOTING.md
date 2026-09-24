@@ -119,6 +119,30 @@ Other column names are ignored.
 
 ---
 
+## A fund that exists comes back "N/A / no data"
+
+Fixed in v2.5.0. The old lookup loaded the all-funds base page, typed
+the CNPJ, waited for the autocomplete dropdown and read the results
+after a fixed sleep — any slow step became a false "not found", and the
+fixed sleep could even pick a card from the unfiltered listing (wrong
+fund, plausible name). The lookup now opens `/busca/fundos?q=<cnpj>`
+directly and only clicks a result card whose text carries that CNPJ.
+
+What the per-CNPJ status means now (session log / activity feed):
+
+- `No results found for CNPJ … (ANBIMA: Nenhum Fundo encontrado)` —
+  ANBIMA has no fund under that CNPJ. Check the number; try the CVM
+  route, which uses CVM's own registry.
+- `Results don't match CNPJ … (got: …)` — the site answered with other
+  funds. The scraper refused to click a lookalike. Report it with the
+  log; it usually means ANBIMA changed the results page.
+- `No results found for CNPJ …` (no ANBIMA note) — the page rendered
+  nothing twice in a row. ANBIMA was slow; re-run that CNPJ.
+- `Timeout: Page took too long to load` — page load exceeded 60s.
+  Re-run; if it repeats across many CNPJs, see the anti-bot section.
+
+---
+
 ## Excel dates show as text / need "Text to Columns"
 
 Fixed in v2.4.0 — `DataProcessor.write_excel` writes real date cells
