@@ -21,11 +21,12 @@ Windows end user: `1-INSTALAR.bat` (once) → `2-ABRIR-COTA.bat` (use) → `3-AT
 python tests/smoke_test.py       # FIDC processor + subclass matcher
 python tests/cvm_ingest_test.py  # CVM downloader/processor
 python tests/cvm_route_test.py   # CVM Streamlit route (AppTest, no network)
+python tests/run_worker_test.py  # background scrape worker (fake scrapers, no network)
 python monitor_and_verify.py     # verify scraped data integrity
 python monitor_progress.py       # check run progress
 ```
 
-CI: `.github/workflows/windows-smoke.yml` runs all three test files + a headless app boot on windows-latest for every push to main.
+CI: `.github/workflows/windows-smoke.yml` runs all four test files + a headless app boot on windows-latest for every push to main.
 
 ## Structure
 
@@ -33,6 +34,7 @@ CI: `.github/workflows/windows-smoke.yml` runs all three test files + a headless
 - `cota_theme.py` — Cota design system (CSS + HTML helpers)
 - `stealth_scraper.py` — anti-bot evasion layer (+ FIDC methods, proxy support)
 - `anbima_scraper.py` — plain-Selenium scraper (stealth off)
+- `run_worker.py` — the scrape loop, in a daemon thread (RunState + per-CNPJ results dict); the Streamlit scrape phases only render its snapshot
 - `data_processor.py` — clean/transform scraped data; `write_excel` = the single Excel writer (dd/mm/yyyy dates, numeric quotas)
 - `cvm_downloader.py` / `cvm_processor.py` — CVM open-data ingest (cached in `cvm_cache/`)
 - `main.py` / `main_parallel.py` / `main_cvm.py` — CLI entry points

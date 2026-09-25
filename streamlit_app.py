@@ -23,6 +23,7 @@ from data_processor import DataProcessor
 import config
 import cvm_downloader
 import cvm_processor
+import run_worker
 
 # Setup logging to capture all events
 LOG_DIR = Path("session_logs")
@@ -266,6 +267,18 @@ if "fidc_stop" not in st.session_state:
     st.session_state.fidc_stop = False
 if "fidc_last_excel_path" not in st.session_state:
     st.session_state.fidc_last_excel_path = None
+# Background runs (run_worker.RunState). The scrape loop lives in a daemon
+# thread; the script only renders its state, so app reruns can't restart it.
+if "run" not in st.session_state:
+    st.session_state.run = None
+if "fidc_run" not in st.session_state:
+    st.session_state.fidc_run = None
+if "run_error" not in st.session_state:
+    st.session_state.run_error = None
+if "fidc_run_error" not in st.session_state:
+    st.session_state.fidc_run_error = None
+if "last_excel_path" not in st.session_state:
+    st.session_state.last_excel_path = None
 # {normalized_cnpj: desired_subclass_label} — when set, keep only the matching
 # subclass per CNPJ (from an optional "Subclasse desejada" column on upload).
 if "fidc_desired" not in st.session_state:
@@ -454,11 +467,18 @@ st.markdown(
 
 # Functional nav row (sits under the topbar). We can't put real Streamlit
 # buttons inside the HTML topbar, so we render this strip just below.
+# Navigation is locked while a scrape runs: the run itself survives a route
+# change now, but leaving the page mid-run only invites confusion.
+_run_active = any(
+    r is not None and not r.done
+    for r in (st.session_state.get("run"), st.session_state.get("fidc_run"))
+)
 _nav_cols = st.columns([1, 1, 1, 1, 1, 3, 1])
 with _nav_cols[0]:
     if st.button(
         "New scrape",
         key="nav_scrape",
+        disabled=_run_active,
         type=("primary" if st.session_state.route == "scrape" else "secondary"),
     ):
         st.session_state.route = "scrape"
@@ -467,6 +487,7 @@ with _nav_cols[1]:
     if st.button(
         "FIDC",
         key="nav_fidc",
+        disabled=_run_active,
         type=("primary" if st.session_state.route == "fidc" else "secondary"),
     ):
         st.session_state.route = "fidc"
@@ -475,6 +496,7 @@ with _nav_cols[2]:
     if st.button(
         "CVM",
         key="nav_cvm",
+        disabled=_run_active,
         type=("primary" if st.session_state.route == "cvm" else "secondary"),
     ):
         st.session_state.route = "cvm"
@@ -483,6 +505,7 @@ with _nav_cols[3]:
     if st.button(
         "History",
         key="nav_history",
+        disabled=_run_active,
         type=("primary" if st.session_state.route == "history" else "secondary"),
     ):
         st.session_state.route = "history"
@@ -491,14 +514,112 @@ with _nav_cols[4]:
     if st.button(
         "Settings",
         key="nav_settings",
+        disabled=_run_active,
         type=("primary" if st.session_state.route == "settings" else "secondary"),
     ):
         st.session_state.route = "settings"
         st.rerun()
 with _nav_cols[6]:
-    if st.button("Log out", key="nav_logout"):
+    if st.button("Log out", key="nav_logout", disabled=_run_active):
         st.session_state.authenticated = False
         st.rerun()
+
+
+# ── Background-run rendering helpers (shared by the scrape and FIDC routes) ──
+def _render_run_progress(snap: dict) -> None:
+    """Hero ring + KPI tiles + progress bar + activity feed + banners from a
+    run_worker.RunState snapshot."""
+    done_n = snap["success"] + snap["failed"]
+    total_n = max(1, snap["total"])
+    pct = done_n / total_n
+    elapsed = snap["elapsed"]
+    remaining = ((elapsed / done_n) * (total_n - done_n) / 60) if done_n > 0 else None
+    throughput = (done_n / (elapsed / 60)) if elapsed > 0 and done_n > 0 else None
+    st.markdown(
+        cota_theme.progress_hero(
+            pct=pct,
+            processed=f"{done_n} / {total_n}",
+            success=snap["success"],
+            failed=snap["failed"],
+            elapsed_min=elapsed / 60,
+            remaining_min=remaining,
+            throughput_per_min=throughput,
+        ),
+        unsafe_allow_html=True,
+    )
+    st.markdown(cota_theme.progress_bar_html(pct), unsafe_allow_html=True)
+    current = (
+        {"cnpj": snap["current"], "name": "Fetching…"}
+        if snap["current"] and not snap["done"]
+        else None
+    )
+    st.markdown(
+        cota_theme.activity_panel(snap["events"], current_event=current),
+        unsafe_allow_html=True,
+    )
+    for level, text in snap["notes"]:
+        getattr(st, level)(text)
+
+
+def _run_error_banner(key: str) -> None:
+    """Show (once) why the last run could not start, e.g. driver init failed."""
+    err = st.session_state.get(key)
+    if not err:
+        return
+    msg, tb = err
+    st.error(f"❌ The run could not start: **{msg}**")
+    if tb:
+        with st.expander("🔧 Technical details (share this with the developer)"):
+            st.code(tb, language="text")
+    st.session_state[key] = None
+
+
+def _finish_scrape_run(run) -> None:
+    """Copy a finished background run into the session keys the Done screen
+    reads. Idempotent — the polling fragment may see `done` more than once."""
+    if run.finalized:
+        return
+    run.finalized = True
+    st.session_state.activity_events = list(run.events)
+    st.session_state.status_messages = list(run.status_messages)
+    st.session_state.success_count = run.success_count
+    st.session_state.failed_count = run.failed_count
+    st.session_state.results = run.output_df
+    st.session_state.progress = len(run.results) / max(1, len(run.cnpjs))
+    if run.excel_path is not None:
+        st.session_state.last_excel_path = str(run.excel_path)
+    st.session_state.scraping_in_progress = False
+    st.session_state.stop_scraping = False
+    if run.output_df is not None:
+        st.session_state.phase = "done"
+    else:
+        st.session_state.run_error = (
+            run.error or "No results were produced",
+            run.error_tb,
+        )
+        st.session_state.phase = "review"
+
+
+def _finish_fidc_run(run) -> None:
+    if run.finalized:
+        return
+    run.finalized = True
+    st.session_state.fidc_activity_events = list(run.events)
+    st.session_state.fidc_success_count = run.success_count
+    st.session_state.fidc_failed_count = run.failed_count
+    st.session_state.fidc_results = run.output_df
+    if run.excel_path is not None:
+        st.session_state.fidc_last_excel_path = str(run.excel_path)
+    st.session_state.fidc_stop = False
+    if run.output_df is not None:
+        st.session_state.fidc_phase = "done"
+    else:
+        st.session_state.fidc_run_error = (
+            run.error or "No results were produced",
+            run.error_tb,
+        )
+        st.session_state.fidc_phase = "review"
+
 
 # Run settings live in session_state.settings (configured on the Review phase).
 # Read once here so the rest of the file can reuse the names it always used.
@@ -972,6 +1093,7 @@ if st.session_state.route == "fidc":
 
     # --- Phase: REVIEW -------------------------------------------------------
     elif st.session_state.fidc_phase == "review":
+        _run_error_banner("fidc_run_error")
         rev_l, rev_r = st.columns([1.4, 1])
         with rev_l:
             with st.container(border=True):
@@ -1093,305 +1215,56 @@ if st.session_state.route == "fidc":
                     st.session_state.session_logger.info(
                         f"Total CNPJs: {len(st.session_state.fidc_cnpjs)}"
                     )
+                    st.session_state.fidc_run = run_worker.start(
+                        run_worker.RunState(
+                            kind="fidc",
+                            cnpjs=st.session_state.fidc_cnpjs,
+                            settings=st.session_state.settings,
+                            logger=st.session_state.session_logger,
+                            start_time=st.session_state.fidc_start_time,
+                            desired=st.session_state.fidc_desired,
+                        )
+                    )
                     st.rerun()
 
     # --- Phase: SCRAPE -------------------------------------------------------
     elif st.session_state.fidc_phase == "scrape":
-        with st.container(border=True):
-            head_l, head_r = st.columns([4, 1])
-            with head_l:
-                st.markdown(
-                    '<h2 class="cota-card-title">FIDC scraping in progress</h2>'
-                    f'<p class="cota-card-sub">'
-                    f"{'Stealth driver' if st.session_state.settings['stealth'] else 'Standard driver'} · "
-                    f"{st.session_state.settings['delay']:.1f}s delay</p>",
-                    unsafe_allow_html=True,
-                )
-            with head_r:
-                if st.button(
-                    "⬛  Stop", type="secondary", width="stretch", key="fidc_stop_btn"
-                ):
-                    st.session_state.fidc_stop = True
-
-            fidc_hero = st.empty()
-            fidc_bar = st.empty()
-            fidc_activity = st.empty()
-            fidc_status = st.empty()
-
-            def _render_fidc_live(current_event: dict | None = None) -> None:
-                events = st.session_state.fidc_activity_events
-                success = st.session_state.fidc_success_count
-                failed = st.session_state.fidc_failed_count
-                done_n = success + failed
-                total_n = max(1, len(st.session_state.fidc_cnpjs))
-                pct = done_n / total_n
-                elapsed = (
-                    time.time() - st.session_state.fidc_start_time
-                    if st.session_state.fidc_start_time
-                    else 0.0
-                )
-                remaining = (
-                    ((elapsed / done_n) * (total_n - done_n) / 60)
-                    if done_n > 0
-                    else None
-                )
-                throughput = (
-                    (done_n / (elapsed / 60)) if elapsed > 0 and done_n > 0 else None
-                )
-                fidc_hero.markdown(
-                    cota_theme.progress_hero(
-                        pct=pct,
-                        processed=f"{done_n} / {total_n}",
-                        success=success,
-                        failed=failed,
-                        elapsed_min=elapsed / 60,
-                        remaining_min=remaining,
-                        throughput_per_min=throughput,
-                    ),
-                    unsafe_allow_html=True,
-                )
-                fidc_bar.markdown(
-                    cota_theme.progress_bar_html(pct), unsafe_allow_html=True
-                )
-                fidc_activity.markdown(
-                    cota_theme.activity_panel(events, current_event=current_event),
-                    unsafe_allow_html=True,
-                )
-
-            _render_fidc_live()
-
-        scraper = None
-        results = []
-        total = len(st.session_state.fidc_cnpjs)
-        was_interrupted = False
-
-        # Incremental persistence (same safety net as the regular flow): write a
-        # "_partial" Excel after every CNPJ so a killed process keeps everything
-        # scraped so far. Promoted to the final name in finally on clean finish.
-        _fidc_run_ts = datetime.fromtimestamp(
-            st.session_state.fidc_start_time or time.time()
-        ).strftime("%Y%m%d_%H%M%S")
-        _fidc_partial_path = RESULTS_DIR / f"fidc_results_{_fidc_run_ts}_partial.xlsx"
-        _fidc_persist_processor = DataProcessor()
-
-        def _persist_fidc_partial():
-            if not results:
-                return
-            try:
-                RESULTS_DIR.mkdir(exist_ok=True)
-                DataProcessor.write_excel(
-                    _fidc_persist_processor.process_fidc_data(results),
-                    _fidc_partial_path,
-                )
-                st.session_state.fidc_last_excel_path = str(_fidc_partial_path)
-            except Exception as e:
-                st.session_state.session_logger.warning(
-                    f"[FIDC] Incremental save failed: {e}"
-                )
-
-        try:
-            use_stealth = st.session_state.settings["stealth"]
-            headless = st.session_state.settings["headless"]
-            if use_stealth:
-                scraper = StealthANBIMAScraper(
-                    headless=headless,
-                    proxy=st.session_state.settings.get("proxy") or None,
-                )
-            else:
-                from anbima_scraper import ANBIMAScraper
-
-                scraper = ANBIMAScraper(headless=headless)
-
-            if not hasattr(scraper, "scrape_fidc_data"):
-                fidc_status.error(
-                    "❌ The selected scraper has no FIDC support. Turn Stealth mode ON "
-                    "(the FIDC workflow requires the stealth scraper)."
-                )
-                st.session_state.fidc_phase = "review"
-                st.stop()
-
-            if not scraper.setup_driver():
-                real_error = (
-                    getattr(scraper, "last_init_error", None) or "Unknown error"
-                )
-                real_tb = getattr(scraper, "last_init_traceback", None)
-                with fidc_status.container():
-                    st.error(f"❌ Failed to initialize web driver:\n\n**{real_error}**")
-                    with st.expander("🔧 Technical details"):
-                        st.code(real_tb or real_error, language="text")
-                st.session_state.session_logger.error(
-                    f"[FIDC] setup_driver failed: {real_error}"
-                )
-                st.stop()
-
-            driver_mode = getattr(scraper, "driver_mode", None)
-            if driver_mode:
-                fidc_status.success(f"✅ WebDriver: **{driver_mode}**")
-
-            for idx, cnpj in enumerate(st.session_state.fidc_cnpjs, 1):
-                if st.session_state.fidc_stop:
-                    fidc_status.warning(
-                        f"⚠️ Stopped by user after {idx - 1}/{total} CNPJs"
-                    )
-                    was_interrupted = True
-                    break
-
-                _render_fidc_live(current_event={"cnpj": cnpj, "name": "Fetching…"})
-                t0 = time.time()
-                st.session_state.session_logger.info(
-                    f"[FIDC {idx}/{total}] CNPJ: {cnpj}"
-                )
-                try:
-                    result = scraper.scrape_fidc_data(cnpj)
-
-                    # Optional per-CNPJ subclass filter: keep only the subclass
-                    # the user asked for. If the label matches nothing, keep all
-                    # (so data isn't lost) and note it.
-                    import re as _re
-
-                    desired = st.session_state.fidc_desired.get(
-                        _re.sub(r"\s+", "", str(cnpj))
-                    )
-                    if desired and result.get("subclasses"):
-                        kept = [
-                            s
-                            for s in result["subclasses"]
-                            if subclass_matches(desired, s)
-                        ]
-                        if kept:
-                            result["subclasses"] = kept
-                            st.session_state.session_logger.info(
-                                f"[FIDC {idx}/{total}] filtered to '{desired}': "
-                                f"{len(kept)} subclass(es)"
-                            )
-                        else:
-                            st.session_state.session_logger.warning(
-                                f"[FIDC {idx}/{total}] desired '{desired}' matched no "
-                                f"subclass — keeping all {len(result['subclasses'])}"
-                            )
-
-                    results.append(result)
-                    ms = int((time.time() - t0) * 1000)
-                    subs = result.get("subclasses", []) or []
-                    n_subs = len(subs)
-                    n_rows = sum(len(s.get("periodic_data", []) or []) for s in subs)
-                    if result.get("Status") == "Success" and n_rows > 0:
-                        st.session_state.fidc_success_count += 1
-                        st.session_state.fidc_activity_events.append(
-                            {
-                                "cnpj": cnpj,
-                                "name": f"{n_subs} subclasse{'s' if n_subs != 1 else ''}",
-                                "status": "success",
-                                "points": n_rows,
-                                "ms": ms,
-                            }
-                        )
-                        st.session_state.session_logger.info(
-                            f"[FIDC {idx}/{total}] SUCCESS: {cnpj} - {n_subs} subclasses, {n_rows} rows"
-                        )
-                    else:
-                        st.session_state.fidc_failed_count += 1
-                        st.session_state.fidc_activity_events.append(
-                            {
-                                "cnpj": cnpj,
-                                "name": result.get("Status", "Failed"),
-                                "status": "failed",
-                                "points": 0,
-                                "ms": ms,
-                            }
-                        )
-                        st.session_state.session_logger.warning(
-                            f"[FIDC {idx}/{total}] FAILED: {cnpj} - {result.get('Status')}"
-                        )
-                except Exception as e:
-                    ms = int((time.time() - t0) * 1000)
-                    err = str(e)[:50]
-                    st.session_state.fidc_failed_count += 1
-                    st.session_state.fidc_activity_events.append(
-                        {
-                            "cnpj": cnpj,
-                            "name": f"Error: {err}",
-                            "status": "failed",
-                            "points": 0,
-                            "ms": ms,
-                        }
-                    )
-                    st.session_state.session_logger.error(
-                        f"[FIDC {idx}/{total}] EXCEPTION: {cnpj} - {str(e)}"
-                    )
-                    results.append(
-                        {"CNPJ": cnpj, "Status": f"Error: {err}", "subclasses": []}
-                    )
-
-                _persist_fidc_partial()  # incremental save — survives a killed process
-                _render_fidc_live()
-
-                if getattr(scraper, "_driver_permanently_dead", False):
-                    fidc_status.error(
-                        "🛑 Chrome kept dying and could not be recovered — stopping the run. "
-                        "Turn the **Headless browser** toggle OFF and retry. "
-                        f"Partial results up to {idx}/{total} are saved (see History)."
-                    )
-                    st.session_state.session_logger.error(
-                        f"[FIDC] Aborting run at {idx}/{total} — driver permanently dead"
-                    )
-                    was_interrupted = True
-                    break
-
-        except Exception as e:
-            fidc_status.error(f"❌ Error during FIDC scraping: {str(e)}")
-            st.session_state.session_logger.error(f"[FIDC] Fatal: {str(e)}")
-            st.session_state.session_logger.debug(traceback.format_exc())
-            was_interrupted = True
-
-        finally:
-            if scraper:
-                try:
-                    scraper.close()
-                except Exception:
-                    pass
-
-            if results:
-                try:
-                    processor = DataProcessor()
-                    fidc_df = processor.process_fidc_data(results)
-                    st.session_state.fidc_results = fidc_df
-                    try:
-                        interrupted = was_interrupted or st.session_state.fidc_stop
-                        suffix = "_partial" if interrupted else ""
-                        fidc_path = (
-                            RESULTS_DIR / f"fidc_results_{_fidc_run_ts}{suffix}.xlsx"
-                        )
-                        DataProcessor.write_excel(fidc_df, fidc_path)
-                        st.session_state.fidc_last_excel_path = str(fidc_path)
-                        # Promote the partial to final on clean completion.
-                        if (
-                            not interrupted
-                            and _fidc_partial_path.exists()
-                            and _fidc_partial_path != fidc_path
-                        ):
-                            try:
-                                _fidc_partial_path.unlink()
-                            except Exception:
-                                pass
-                        st.session_state.session_logger.info(
-                            f"[FIDC] Excel saved to {fidc_path}"
-                        )
-                    except Exception as e:
-                        st.session_state.session_logger.warning(
-                            f"[FIDC] Could not persist Excel: {e}"
-                        )
-                except Exception as e:
-                    fidc_status.warning(f"⚠️ Could not process FIDC results: {str(e)}")
-                    st.session_state.session_logger.error(
-                        f"[FIDC] Processing error: {str(e)}"
-                    )
-
-            st.session_state.fidc_phase = "done"
-            if st.session_state.fidc_stop or was_interrupted:
-                st.session_state.fidc_stop = False
-            st.session_state.session_logger.info("FIDC SCRAPING ENDED")
+        # The scrape runs in a background thread (run_worker); this block only
+        # renders its state once a second. App reruns no longer restart it.
+        if st.session_state.fidc_run is None:
+            st.session_state.fidc_phase = "review"
             st.rerun()
+
+        @st.fragment(run_every=1.0)
+        def _fidc_live() -> None:
+            run = st.session_state.fidc_run
+            snap = run.snapshot()
+            with st.container(border=True):
+                head_l, head_r = st.columns([4, 1])
+                with head_l:
+                    st.markdown(
+                        '<h2 class="cota-card-title">FIDC scraping in progress</h2>'
+                        f'<p class="cota-card-sub">'
+                        f"{'Stealth driver' if st.session_state.settings['stealth'] else 'Standard driver'} · "
+                        f"{st.session_state.settings['delay']:.1f}s delay</p>",
+                        unsafe_allow_html=True,
+                    )
+                with head_r:
+                    if st.button(
+                        "⬛  Stop",
+                        type="secondary",
+                        width="stretch",
+                        key="fidc_stop_btn",
+                        disabled=snap["stop"] or snap["done"],
+                    ):
+                        run.request_stop()
+                        st.rerun(scope="fragment")
+                _render_run_progress(snap)
+            if snap["done"]:
+                _finish_fidc_run(run)
+                st.rerun()
+
+        _fidc_live()
 
     # --- Phase: DONE ---------------------------------------------------------
     elif (
@@ -1683,6 +1556,7 @@ if st.session_state.phase == "upload":
 
 # --- Phase: REVIEW (CNPJ table + Run settings) -------------------------------
 elif st.session_state.phase == "review":
+    _run_error_banner("run_error")
     review_left, review_right = st.columns([1.4, 1])
 
     # Left card: searchable CNPJ table
@@ -1862,366 +1736,62 @@ elif st.session_state.phase == "review":
                 )
                 st.session_state.session_logger.info("=" * 80)
 
+                st.session_state.run = run_worker.start(
+                    run_worker.RunState(
+                        kind="scrape",
+                        cnpjs=st.session_state.cnpjs,
+                        settings=st.session_state.settings,
+                        logger=st.session_state.session_logger,
+                        start_time=st.session_state.start_time,
+                    )
+                )
                 st.rerun()
 
 # --- Phase: SCRAPE -----------------------------------------------------------
 if st.session_state.phase == "scrape":
-    # Header card: title + run summary line + Stop button
-    with st.container(border=True):
-        head_l, head_r = st.columns([4, 1])
-        with head_l:
-            settings_str = (
-                f"{'Stealth driver' if use_stealth else 'Standard driver'} · "
-                f"{num_workers} worker{'s' if num_workers > 1 else ''} · "
-                f"{st.session_state.settings['delay']:.1f}s delay"
-            )
-            st.markdown(
-                '<h2 class="cota-card-title">Scraping in progress</h2>'
-                f'<p class="cota-card-sub">{settings_str}</p>',
-                unsafe_allow_html=True,
-            )
-        with head_r:
-            if st.button(
-                "⬛  Stop", type="secondary", width="stretch", key="scrape_stop"
-            ):
-                st.session_state.stop_scraping = True
-
-        # Live regions — written to from inside the loop via .markdown(...).
-        hero_slot = st.empty()
-        bar_slot = st.empty()
-        activity_slot = st.empty()
-        status_slot = st.empty()  # for inline success/error banners
-
-        def _render_live(current_event: dict | None = None) -> None:
-            """Re-render the three live regions from current session state."""
-            events = st.session_state.activity_events
-            success = st.session_state.success_count
-            failed = st.session_state.failed_count
-            done_n = success + failed
-            total_n = max(1, len(st.session_state.cnpjs))
-            pct = done_n / total_n
-            elapsed = (
-                time.time() - st.session_state.start_time
-                if st.session_state.start_time
-                else 0.0
-            )
-            remaining = (
-                ((elapsed / done_n) * (total_n - done_n) / 60) if done_n > 0 else None
-            )
-            throughput = (
-                (done_n / (elapsed / 60)) if elapsed > 0 and done_n > 0 else None
-            )
-            hero_slot.markdown(
-                cota_theme.progress_hero(
-                    pct=pct,
-                    processed=f"{done_n} / {total_n}",
-                    success=success,
-                    failed=failed,
-                    elapsed_min=elapsed / 60,
-                    remaining_min=remaining,
-                    throughput_per_min=throughput,
-                ),
-                unsafe_allow_html=True,
-            )
-            bar_slot.markdown(cota_theme.progress_bar_html(pct), unsafe_allow_html=True)
-            activity_slot.markdown(
-                cota_theme.activity_panel(events, current_event=current_event),
-                unsafe_allow_html=True,
-            )
-
-        # Show empty live regions while the driver is booting.
-        _render_live()
-
-    # ─── Run scraping ─────────────────────────────────────────────────────
-    scraper = None
-    results = []
-    total = len(st.session_state.cnpjs)
-    was_interrupted = False
-
-    # Incremental persistence: write a "_partial" Excel after every CNPJ so a
-    # killed process (OOM, headless-Chrome recovery storm, tab disconnect)
-    # never loses what was already scraped. The finally block promotes it to
-    # the final filename on clean completion.
-    _run_ts = datetime.fromtimestamp(
-        st.session_state.start_time or time.time()
-    ).strftime("%Y%m%d_%H%M%S")
-    _partial_path = RESULTS_DIR / f"anbima_results_{_run_ts}_partial.xlsx"
-    _persist_processor = DataProcessor()
-
-    def _persist_partial():
-        """Overwrite the partial Excel with everything collected so far."""
-        if not results:
-            return
-        try:
-            RESULTS_DIR.mkdir(exist_ok=True)
-            DataProcessor.write_excel(
-                _persist_processor.process_scraped_data(results), _partial_path
-            )
-            st.session_state.last_excel_path = str(_partial_path)
-        except Exception as e:
-            st.session_state.session_logger.warning(f"Incremental save failed: {e}")
-
-    try:
-        # Initialize scraper
-        if use_stealth:
-            scraper = StealthANBIMAScraper(
-                headless=headless,
-                proxy=st.session_state.settings.get("proxy") or None,
-            )
-        else:
-            from anbima_scraper import ANBIMAScraper
-
-            scraper = ANBIMAScraper(headless=headless)
-
-        if not scraper.setup_driver():
-            # Surface the underlying driver error directly in the status slot.
-            real_error = getattr(scraper, "last_init_error", None) or "Unknown error"
-            real_tb = getattr(scraper, "last_init_traceback", None)
-            with status_slot.container():
-                st.error(f"❌ Failed to initialize web driver:\n\n**{real_error}**")
-                with st.expander(
-                    "🔧 Technical details (share this with the developer)"
-                ):
-                    st.code(real_tb or real_error, language="text")
-                    st.caption(
-                        "Common causes: Streamlit Cloud Chrome version mismatch, "
-                        "out-of-memory kill from a previous run (try the "
-                        "'Kill Orphan Chrome' button in the sidebar), or the app "
-                        "needs a hard reboot from the Streamlit Cloud dashboard."
-                    )
-            st.session_state.session_logger.error(f"setup_driver failed: {real_error}")
-            if real_tb:
-                st.session_state.session_logger.debug(real_tb)
-            st.session_state.scraping_in_progress = False
-            st.stop()
-
-        # Surface the driver strategy that won (UC vs plain Selenium).
-        driver_mode = getattr(scraper, "driver_mode", None)
-        if driver_mode:
-            if "plain Selenium" in driver_mode:
-                status_slot.info(
-                    f"ℹ️ WebDriver: **{driver_mode}** (UC unavailable — stealth level reduced)"
-                )
-            else:
-                status_slot.success(f"✅ WebDriver: **{driver_mode}**")
-        st.session_state.session_logger.info(
-            f"WebDriver initialized successfully via: {driver_mode}"
-        )
-
-        for idx, cnpj in enumerate(st.session_state.cnpjs, 1):
-            # Check if user requested stop
-            if st.session_state.stop_scraping:
-                st.session_state.session_logger.info(
-                    f"Scraping stopped by user at CNPJ {idx}/{total}"
-                )
-                status_slot.warning(
-                    f"⚠️ Scraping stopped by user after {idx - 1}/{total} CNPJs"
-                )
-                was_interrupted = True
-                break
-
-            # Show shimmering "Fetching…" row for the in-flight CNPJ.
-            _render_live(current_event={"cnpj": cnpj, "name": "Fetching…"})
-
-            cnpj_start_time = time.time()
-            st.session_state.session_logger.info(
-                f"[{idx}/{total}] Starting CNPJ: {cnpj}"
-            )
-
-            try:
-                result = scraper.scrape_fund_data(cnpj)
-                results.append(result)
-                cnpj_elapsed = time.time() - cnpj_start_time
-                cnpj_ms = int(cnpj_elapsed * 1000)
-                fund_name = str(result.get("Nome do Fundo") or "—")
-
-                if result.get("Status") == "Success":
-                    data_points = len(result.get("periodic_data", []))
-                    st.session_state.success_count += 1
-                    st.session_state.activity_events.append(
-                        {
-                            "cnpj": cnpj,
-                            "name": fund_name,
-                            "status": "success",
-                            "points": data_points,
-                            "ms": cnpj_ms,
-                        }
-                    )
-                    st.session_state.status_messages.append(
-                        f"✅ {cnpj} - Success ({data_points} data points)"
-                    )
-                    st.session_state.session_logger.info(
-                        f"[{idx}/{total}] SUCCESS: {cnpj} - {data_points} data points - {cnpj_elapsed:.1f}s"
-                    )
-                else:
-                    status = result.get("Status", "Failed")
-                    st.session_state.failed_count += 1
-                    st.session_state.activity_events.append(
-                        {
-                            "cnpj": cnpj,
-                            "name": fund_name,
-                            "status": "failed",
-                            "points": 0,
-                            "ms": cnpj_ms,
-                        }
-                    )
-                    st.session_state.status_messages.append(f"❌ {cnpj} - {status}")
-                    st.session_state.session_logger.warning(
-                        f"[{idx}/{total}] FAILED: {cnpj} - Status: {status} - {cnpj_elapsed:.1f}s"
-                    )
-
-            except Exception as e:
-                cnpj_elapsed = time.time() - cnpj_start_time
-                cnpj_ms = int(cnpj_elapsed * 1000)
-                error_short = str(e)[:50]
-                st.session_state.failed_count += 1
-                st.session_state.activity_events.append(
-                    {
-                        "cnpj": cnpj,
-                        "name": f"Error: {error_short}",
-                        "status": "failed",
-                        "points": 0,
-                        "ms": cnpj_ms,
-                    }
-                )
-                st.session_state.status_messages.append(
-                    f"❌ {cnpj} - Error: {error_short}"
-                )
-                st.session_state.session_logger.error(
-                    f"[{idx}/{total}] EXCEPTION: {cnpj} - {str(e)} - {cnpj_elapsed:.1f}s"
-                )
-                st.session_state.session_logger.debug(
-                    f"Traceback:\n{traceback.format_exc()}"
-                )
-                results.append(
-                    {
-                        "CNPJ": cnpj,
-                        "Nome do Fundo": "N/A",
-                        "periodic_data": [],
-                        "Status": f"Error: {error_short}",
-                    }
-                )
-
-            # Update progress + re-render the live regions for this completed item.
-            st.session_state.progress = idx / total
-            _persist_partial()  # incremental save — survives a killed process
-            _render_live()
-
-            # Circuit breaker tripped: Chrome won't stay alive. Stop now instead
-            # of iterating the rest of the list as instant failures.
-            if getattr(scraper, "_driver_permanently_dead", False):
-                status_slot.error(
-                    "🛑 Chrome kept dying and could not be recovered — stopping the run. "
-                    "Turn the **Headless browser** toggle OFF (Review screen) and retry. "
-                    f"Partial results up to {idx}/{total} are saved (see History)."
-                )
-                st.session_state.session_logger.error(
-                    f"Aborting run at {idx}/{total} — driver permanently dead"
-                )
-                was_interrupted = True
-                break
-
-    except Exception as e:
-        error_msg = f"Error during scraping: {str(e)}"
-        status_slot.error(f"❌ {error_msg}")
-        st.session_state.session_logger.error(error_msg)
-        st.session_state.session_logger.debug(
-            f"Full traceback:\n{traceback.format_exc()}"
-        )
-        was_interrupted = True
-
-    finally:
-        # Always close the scraper, even if there was an error
-        if scraper:
-            try:
-                scraper.close()
-                st.session_state.session_logger.info("WebDriver closed successfully")
-            except Exception as e:
-                warning_msg = f"Could not close scraper properly - {str(e)}"
-                status_slot.warning(f"⚠️ Warning: {warning_msg}")
-                st.session_state.session_logger.warning(warning_msg)
-
-        # Process results (even if some failed or scraping was interrupted)
-        if results:
-            try:
-                st.session_state.session_logger.info(
-                    f"Processing {len(results)} results..."
-                )
-                processor = DataProcessor()
-                output_df = processor.process_scraped_data(results)
-                st.session_state.results = output_df
-                st.session_state.session_logger.info(
-                    f"Results processed successfully - {len(output_df)} rows"
-                )
-
-                # Persist the final Excel. An incremental "_partial" file has
-                # been written after every CNPJ; here we promote it to the
-                # final name on clean completion (and remove the partial), or
-                # keep the "_partial" file if the run was interrupted.
-                try:
-                    interrupted = was_interrupted or st.session_state.stop_scraping
-                    suffix = "_partial" if interrupted else ""
-                    excel_path = RESULTS_DIR / f"anbima_results_{_run_ts}{suffix}.xlsx"
-                    DataProcessor.write_excel(output_df, excel_path)
-                    st.session_state.last_excel_path = str(excel_path)
-                    # On clean completion, drop the now-redundant partial file.
-                    if (
-                        not interrupted
-                        and _partial_path.exists()
-                        and _partial_path != excel_path
-                    ):
-                        try:
-                            _partial_path.unlink()
-                        except Exception:
-                            pass
-                    st.session_state.session_logger.info(f"Excel saved to {excel_path}")
-                except Exception as e:
-                    st.session_state.session_logger.warning(
-                        f"Could not persist Excel to disk: {e}"
-                    )
-            except Exception as e:
-                status_slot.warning(
-                    f"⚠️ Warning: Could not process all results - {str(e)}"
-                )
-                st.session_state.session_logger.error(
-                    f"Error processing results: {str(e)}"
-                )
-                st.session_state.session_logger.debug(traceback.format_exc())
-
-        # Final stats
-        total_time = (
-            time.time() - st.session_state.start_time
-            if st.session_state.start_time
-            else 0
-        )
-
-        # Mark complete and advance to the Cota "done" phase so the next
-        # render shows the results screen. The post-scrape banner lives on
-        # the done screen (phase 4).
-        st.session_state.scraping_in_progress = False
-        st.session_state.phase = "done"
-        if st.session_state.stop_scraping or was_interrupted:
-            st.session_state.stop_scraping = False
-
-        # Log completion
-        st.session_state.session_logger.info("=" * 80)
-        st.session_state.session_logger.info("SCRAPING ENDED")
-        st.session_state.session_logger.info(f"Total CNPJs requested: {total}")
-        st.session_state.session_logger.info(f"CNPJs processed: {len(results)}")
-        st.session_state.session_logger.info(
-            f"Successful: {st.session_state.success_count}"
-        )
-        st.session_state.session_logger.info(f"Failed: {st.session_state.failed_count}")
-        st.session_state.session_logger.info(
-            f"Total Time: {total_time / 60:.2f} minutes"
-        )
-        if len(results) > 0:
-            st.session_state.session_logger.info(
-                f"Avg Time per CNPJ: {total_time / len(results):.1f} seconds"
-            )
-        st.session_state.session_logger.info("=" * 80)
-
+    # The scrape itself runs in a background thread (run_worker) — this block
+    # only renders its state, once a second, via a fragment. A rerun of the
+    # app (browser reconnect, Streamlit Stop/Rerun, nav click) no longer
+    # restarts the loop; see run_worker.py for the 2026-09-24 incident.
+    if st.session_state.run is None:
+        st.session_state.phase = "review"
         st.rerun()
+
+    @st.fragment(run_every=1.0)
+    def _scrape_live() -> None:
+        run = st.session_state.run
+        snap = run.snapshot()
+        with st.container(border=True):
+            head_l, head_r = st.columns([4, 1])
+            with head_l:
+                _s = st.session_state.settings
+                settings_str = (
+                    f"{'Stealth driver' if _s['stealth'] else 'Standard driver'} · "
+                    f"{_s['workers']} worker{'s' if _s['workers'] > 1 else ''} · "
+                    f"{_s['delay']:.1f}s delay"
+                )
+                st.markdown(
+                    '<h2 class="cota-card-title">Scraping in progress</h2>'
+                    f'<p class="cota-card-sub">{settings_str}</p>',
+                    unsafe_allow_html=True,
+                )
+            with head_r:
+                if st.button(
+                    "⬛  Stop",
+                    type="secondary",
+                    width="stretch",
+                    key="scrape_stop",
+                    disabled=snap["stop"] or snap["done"],
+                ):
+                    run.request_stop()
+                    st.rerun(scope="fragment")
+            _render_run_progress(snap)
+        if snap["done"]:
+            _finish_scrape_run(run)
+            st.rerun()
+
+    _scrape_live()
+
 
 # Results section
 if st.session_state.phase == "done" and st.session_state.results is not None:

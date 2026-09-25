@@ -63,11 +63,28 @@ Streamlit UI entry point. Owns:
     exhausted), the run aborts immediately with the partial results
     instead of burning the recovery loop on every remaining CNPJ.
 
-The scrape phase pre-creates four `st.empty()` slots
-(`hero_slot`, `bar_slot`, `activity_slot`, `status_slot`) and rewrites
-them via `_render_live(...)` after every CNPJ. This is what gives the
-appearance of a live-updating UI without any JS — Streamlit's slot
-diffing patches each region in place.
+The scrape itself does **not** run in the script. Start builds a
+`run_worker.RunState` and starts a daemon thread; the scrape phase is an
+`st.fragment(run_every=1s)` that reads `run.snapshot()` and redraws the
+hero/KPIs/feed (`_render_run_progress`). When the run reports `done`,
+`_finish_scrape_run` copies its results into the session keys the Done
+screen reads and advances the phase. Reruns of the app (browser
+reconnect, nav, Streamlit Stop/Rerun) therefore only re-render — they
+can't restart or duplicate the loop (the 2026-09-24 "118%" incident).
+
+### `run_worker.py`
+
+The per-CNPJ loop for both the regular and FIDC flows, in a background
+thread. `RunState` holds the inputs (CNPJs, settings copy, session
+logger, optional desired-subclass map) and everything produced: a
+`results` dict keyed by CNPJ (so counts are derived and a CNPJ can never
+be counted twice), activity events, banners, `stop`/`done` flags, the
+output DataFrame and Excel path. `_worker` opens the scraper, iterates
+CNPJs it hasn't recorded yet, writes a `_partial.xlsx` after each one,
+trips the circuit breaker if Chrome is permanently dead, and on exit
+closes the driver, promotes the partial to the final Excel and logs the
+run summary. It never imports Streamlit; tests drive it with a fake
+scraper via `scraper_factory`.
 
 ### `cota_theme.py`
 
@@ -224,15 +241,17 @@ runs or when you want to scrape from a server with no UI.
    Phase advances to **Review**.
 3. User adjusts `settings` (stealth / headless / workers / delay) and
    clicks Start. `kill_orphan_chrome()` runs first.
-4. Phase advances to **Scrape**. The scrape phase block instantiates
+4. Start builds a `run_worker.RunState`, starts its daemon thread and
+   advances the phase to **Scrape**. The worker instantiates
    `StealthANBIMAScraper(headless=...)` and calls `setup_driver()`.
-5. For each CNPJ: render shimmering "Fetching…" row → call
-   `scrape_fund_data(cnpj)` → append `{cnpj, name, status, points, ms}`
-   to `activity_events` → re-render the live regions.
-6. After the loop (or after Stop is clicked) the `finally:` block
-   closes the driver, runs `DataProcessor` over collected results,
-   stashes the DataFrame in `st.session_state.results`, advances phase
-   to **Done**, and reruns.
+5. For each CNPJ the worker calls `scrape_fund_data(cnpj)`, records the
+   result under its CNPJ, appends `{cnpj, name, status, points, ms}` to
+   the run's events and rewrites the `_partial.xlsx`. The scrape-phase
+   fragment polls the run every second and redraws the live regions.
+6. After the loop (or after Stop) the worker closes the driver, runs
+   `DataProcessor` over the results, writes the final Excel and sets
+   `done`. The fragment then copies the run into session state, advances
+   the phase to **Done**, and reruns.
 7. **Done** phase shows the summary card + KPI row + result table
    sourced from `activity_events`; the Download Excel button serves
    the DataFrame from session state.

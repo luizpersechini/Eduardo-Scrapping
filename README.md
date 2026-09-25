@@ -36,6 +36,9 @@ with a plain-Selenium fallback.
 - **Stop button + incremental save** — a `_partial.xlsx` is written to
   `results/` after every CNPJ, so even a killed process keeps everything
   scraped so far.
+- **Background run** — the scrape loop runs in its own thread
+  (`run_worker.py`); the page just polls it. Browser reconnects, nav
+  clicks or Streamlit reruns can't restart or double-count a run.
 - **Circuit breaker** — if the driver dies permanently mid-run, the run
   aborts cleanly with partial results instead of grinding through the
   recovery loop for every remaining CNPJ.
@@ -116,6 +119,7 @@ streamlit_app.py        Streamlit UI entry point (routes: scrape/FIDC/CVM/histor
 cota_theme.py           Cota design system (CSS + HTML helpers)
 stealth_scraper.py      Primary scraper (undetected-chromedriver + fallbacks, FIDC methods)
 anbima_scraper.py       Standard-Selenium scraper (used when stealth is off)
+run_worker.py           Scrape loop in a daemon thread (RunState, per-CNPJ results)
 data_processor.py       Cleans scraper output; write_excel (dd/mm/yyyy dates, numeric quotas)
 cvm_downloader.py       Downloads + caches CVM inf_diario_fi monthly zips
 cvm_processor.py        Filters the CVM CSV to the requested CNPJs
@@ -130,7 +134,7 @@ verify_results.py       Standalone post-run verification
 2-ABRIR-COTA.bat        Windows launcher (PT, end-user)
 3-ATUALIZAR.bat         Windows one-click updater (PT, end-user)
 run_windows.bat         Windows local launcher (developer)
-tests/                  smoke_test, cvm_ingest_test, cvm_route_test (run in CI)
+tests/                  smoke_test, cvm_ingest_test, cvm_route_test, run_worker_test (run in CI)
 .github/workflows/      windows-smoke.yml — install + boot on windows-latest
 .streamlit/             Streamlit config + Cota palette
 packages.txt            Apt deps for Streamlit Cloud (chromium, chromium-driver)

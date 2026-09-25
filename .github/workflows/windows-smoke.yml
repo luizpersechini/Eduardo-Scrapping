@@ -55,6 +55,10 @@ jobs:
         shell: pwsh
         run: venv\Scripts\python.exe tests\cvm_route_test.py
 
+      - name: Unit test — background run worker (fake scrapers)
+        shell: pwsh
+        run: venv\Scripts\python.exe tests\run_worker_test.py
+
       - name: Boot app headless with COTA_NO_LOGIN and wait for health
         shell: pwsh
         env:

@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-09-25 — Scrape loop moved to a background thread
+
+### Fixed
+- **"45 successes out of 38 CNPJs, 118% success rate."** The per-CNPJ
+  loop ran inside the Streamlit script itself, so any rerun mid-run
+  (browser websocket reconnect — Chrome throttles background tabs to one
+  wake-up a minute —, a nav click, Streamlit's own Stop/Rerun) made
+  Streamlit drop the running script and start a fresh one, which
+  restarted the loop at CNPJ 1 with a new Chrome while the old one was
+  still mid-CNPJ. Eduardo's 2026-09-24 log shows six overlapping starts a
+  minute apart. Counters lived in session state and only reset on Start,
+  so they summed across executions; the Excel came from the one execution
+  that finished, so it was right.
+
+### Changed
+- New `run_worker.py`: the loop (scraper, incremental save, circuit
+  breaker, logging) runs in a daemon thread that never touches Streamlit
+  and writes into a `RunState`. Results are a per-CNPJ dict, counts are
+  derived from it (a CNPJ can't be counted twice) and the loop skips CNPJs
+  already done, so re-entry is harmless.
+- The scrape and FIDC "in progress" screens are now `st.fragment`s polling
+  the run once a second; Stop raises a flag. App reruns just re-render.
+- Navigation and Log out are disabled while a run is active.
+- A run that can't start (driver init failed) returns to Review with the
+  error, instead of a stuck progress screen.
+- `tests/run_worker_test.py` (fake scrapers) covers counting, re-entry,
+  Stop, init failure and the FIDC subclass filter; wired into CI.
+
 ## [2.5.0] - 2026-09-23 — Robust fund search (no more phantom "N/A")
 
 ### Fixed

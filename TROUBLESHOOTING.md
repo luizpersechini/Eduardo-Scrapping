@@ -169,6 +169,19 @@ CNPJs. No browser, no anti-bot exposure. Caveats:
 
 ---
 
+## Success rate above 100% / more "buscas" than CNPJs
+
+Fixed in v2.6.0. The loop used to run inside the Streamlit script, so a
+browser reconnect (Chrome throttles a background tab to one wake-up a
+minute), a nav click or Streamlit's Stop/Rerun restarted it from CNPJ 1
+with a new Chrome while the old one was still running; counters summed
+across the overlapping executions (38 CNPJs → "45 successes, 118%"). The
+loop now runs in a background thread and counts per CNPJ; app reruns only
+re-render. If you still see it, send the session log: it will show more
+than one `[1/N] Starting` line.
+
+---
+
 ## Scrape died mid-run — is the data lost?
 
 No. Both scrape flows write `results/<kind>_results_<ts>_partial.xlsx`
